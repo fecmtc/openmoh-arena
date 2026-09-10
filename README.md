@@ -1,109 +1,157 @@
-# OpenMoHAA
+# OpenMoH Arena
 
-[![Build](https://github.com/openmoh/openmohaa/actions/workflows/branches-build.yml/badge.svg?branch=main)](https://github.com/openmoh/openmohaa/actions/workflows/branches-build.yml) [![Release](https://img.shields.io/github/v/release/openmoh/openmohaa)](https://github.com/openmoh/openmohaa/releases) [![Downloads](https://img.shields.io/github/downloads/openmoh/openmohaa/total)](https://github.com/openmoh/openmohaa/releases)
+**OpenMoH Arena** is a competitive-focused MOHAA engine and client based on [OpenMoHAA](https://github.com/openmoh/openmohaa).
 
-![License](https://img.shields.io/github/license/openmoh/openmohaa) ![Commits](https://img.shields.io/github/commit-activity/t/openmoh/openmohaa)
+It is being developed for competitive Medal of Honor: Allied Assault play and for integration with [MoHArena](https://moharena.com/).
 
-![Discord](https://img.shields.io/discord/596049712579215361?logo=discord&logoColor=white&color=5865F2)
+> OpenMoH Arena is an independent derivative project. It is not an official OpenMoHAA release and is not affiliated with or endorsed by the OpenMoHAA project or Electronic Arts.
 
-![logo](misc/openmohaa-text-sm.png)
+## Purpose
 
-## What is OpenMoHAA?
+OpenMoH Arena focuses on the needs of competitive MOHAA players, match administrators, tournament organizers, spectators, and developers.
 
-OpenMoHAA is an open-source project aimed at preserving and enhancing **Medal of Honor: Allied Assault** (including Spearhead and Breakthrough expansions) by providing more features and bugfixes, across modern platforms and architectures.
+Areas of development may include:
 
-Powered by [ioquake3](https://github.com/ioquake/ioq3) and the [F.A.K.K SDK](https://code.idtech.space/ritual/fakk2-sdk), OpenMoHAA provides:
-- Full compatibility with the original game: assets, scripts and multiplayer
-- Better support for modern systems
-- Cross-platform support (Linux, Windows, macOS)
-- Support for both single-player and multiplayer modes
-- Includes all fixes from Spearhead 2.15 and Breakthrough 2.40b
-- More fixes and features, such as bots and a ban system
+* competitive multiplayer improvements
+* match administration
+* tournament-oriented functionality
+* spectator improvements
+* competitive quality-of-life features
+* improved diagnostics
+* networking and stability improvements
+* security and integrity improvements
+* integration with MoHArena services
+* improvements inherited from OpenMoHAA
 
-*OpenMoHAA is an independent project and is not affiliated with or endorsed by Electronic Arts.*
+The intention is to remain reasonably close to OpenMoHAA while introducing functionality specifically useful for organized competitive play.
 
-## Getting started
+## Project status
 
-- 📦 [Installing OpenMoHAA](docs/markdown/01-intro/01-installation.md)
-- ▶️ [How to play: Launching the game, expansions & file locations](docs/markdown/02-running/01-running.md)
-- ❓ [FAQ & Troubleshooting](docs/markdown/02-running/03-faq.md)
-- 🌐 [Setting up a game server](docs/markdown/02-running/02-running-server.md)
+OpenMoH Arena is under active development.
 
-## Reporting Issues
+This repository contains **publicly released source code**.
 
-> [!NOTE]
-> OpenMoHAA hasn't hit version 1.0.0 yet. Think of it like a beta build from the golden age of LAN parties. Features are being added, bugs are getting squashed, and more things are being tweaked. Things might change, break, or get even better over time.
-> 
-> If that sounds like your kind of mission, gear up, frag some bots, and help level up OpenMoHAA!
+Development may occur privately between public source releases, so this repository may not always reflect the latest development version.
 
-If you encounter a bug or a problem, you can do one of the following:
-- Submit an [issue](https://github.com/openmoh/openmohaa/issues) on GitHub (use the template).
-- Join the [OpenMoHAA Discord](https://discord.gg/NYtH58R) for a quick help.
+Public releases represent selected source snapshots that are considered suitable for publication.
 
-## Additional documentation
+## Source releases
 
-- 📖 [Documentation](https://openmoh.github.io/openmohaa)
-- ⚙️ [Game settings & configuration](docs/markdown/03-configuration/01-configuration.md)
-- 📝 [Code & Scripting reference](docs/markdown/04-coding/02-coding.md)
-- 📜 [Contributing guidelines](CONTRIBUTING.md)
+Versions published in this repository are tagged using semantic-style version numbers such as:
 
-## Current state
+```text
+v0.1.0
+v0.2.0
+v1.0.0
+```
 
-- 🧰 [List of differences](docs/markdown/01-intro/04-differences.md)
+The Git tag for a release identifies the corresponding public source version.
 
-### Single-player
+## Binaries
 
-The entire single-player campaign should work (Allied Assault, Spearhead and Breakthrough). If you encounter any bug, please create a new [GitHub issue](https://github.com/openmoh/openmohaa/issues) describing them.
+This repository is currently intended primarily for **source-code releases**.
 
-### Multiplayer
+Official compiled OpenMoH Arena binaries may be distributed separately in the future.
 
-- Almost fully stable
-- All official game modes are supported, including those from Spearhead and Breakthrough:
-  - Free-For-All
-  - Team-Deathmatch
-  - Round-based match
-  - Objective match
-  - Tug-of-War (Spearhead)
-  - Liberation (Breakthrough)
-- Popular mods like **Freeze-Tag** are supported
-- Built-in bots for offline practice and for testing
-  - 🔧 [Setting up bots](docs/markdown/02-running/01-running.md#Playing-with-bots)
+The absence of binaries from this repository does not mean the project cannot be built from source.
 
-You can host your own [OpenMoHAA server](docs/markdown/02-running/02-running-server.md#) or join others using OpenMoHAA.
+## Building
 
-## Screenshots
+OpenMoH Arena inherits much of its build system from OpenMoHAA.
 
-|                                                                                   |                                                                            |
-|-----------------------------------------------------------------------------------|----------------------------------------------------------------------------|
-| ![](docs/assets/images/v0.60.0-x86_64/mohdm1_1.png)                                      | ![](docs/assets/images/v0.60.0-x86_64/training_1.png)                               |
-| ![](docs/assets/images/v0.60.0-x86_64/flughafen_1.png)                                   | ![](docs/assets/images/v0.60.0-x86_64/flughafen_2.png)                            |
-| ![](docs/assets/images/v0.60.0-x86_64/mohdm2_1.png "Playing Freeze-Tag mode with bots")  | ![](docs/assets/images/v0.60.0-x86_64/training_3.png "Single-Player training")    |
+The project uses CMake and supports multiple platforms.
 
-*More screenshots [here](docs/assets/images)*
+Build instructions will be documented here as the OpenMoH Arena build and release process is finalized.
 
-## Development & Compiling
+Until then, OpenMoHAA's upstream build system and documentation may be useful references:
 
-- 💻 [Building from source](docs/markdown/04-coding/01-compiling.md)
+https://github.com/openmoh/openmohaa
 
-## Third party librairies
+## Relationship to OpenMoHAA
 
-The following third party tools and libraries are used by the project
+OpenMoH Arena is derived from OpenMoHAA.
 
-- [Flex](https://github.com/westes/flex)
-- [Bison](https://savannah.gnu.org/projects/bison/)
-- [SDL](http://www.libsdl.org/)
-- [OpenAL](https://www.openal.org/)
-- [LibMAD](http://www.underbit.com/products/mad/)
-- [cURL](https://curl.se/)
-- [Libogg](https://github.com/gcp/libogg)
-- [Libvorbis](https://xiph.org/vorbis/)
-- [Libopus](https://opus-codec.org/)
+Upstream OpenMoHAA:
 
-## Resources
+https://github.com/openmoh/openmohaa
 
-- 🔗 [GitHub Repository](https://github.com/openmoh/openmohaa/)
-- 🌐 [MOH-DB](https://www.moh-db.com/)
-- 🕹️ [333networks](https://333networks.com/)
-- 📂 [ModDB](https://www.moddb.com/games/medal-of-honor-allied-assault)
-- 📂 [GameBanana](https://gamebanana.com/games/720)
-- 💬 [Join us on Discord](https://discord.gg/NYtH58R)
+OpenMoH Arena periodically incorporates relevant upstream fixes and improvements while maintaining its own competitive-focused changes.
+
+Where practical, generic fixes that are useful beyond OpenMoH Arena may be suitable for contribution back to upstream.
+
+## MoHArena
+
+OpenMoH Arena is intended to complement:
+
+https://moharena.com/
+
+MoHArena is the competitive platform and community layer, while OpenMoH Arena is intended to provide the game-engine/client side of that ecosystem.
+
+Conceptually:
+
+```text
+MoHArena
+Competitive platform, matches, community and services
+
+        +
+
+OpenMoH Arena
+Competitive MOHAA engine and client
+```
+
+## Compatibility
+
+Compatibility goals include preserving support for existing MOHAA gameplay and content wherever practical.
+
+However, competitive functionality may require behavior that differs from stock MOHAA or upstream OpenMoHAA.
+
+Any important compatibility differences should be documented as the project develops.
+
+## Contributing
+
+The public repository may accept issues, bug reports, technical discussion, and contributions in the future.
+
+Before contributing code, please keep changes focused and avoid unnecessary large-scale refactoring.
+
+Changes that improve OpenMoHAA generally rather than specifically serving OpenMoH Arena may also be appropriate for contribution to the upstream OpenMoHAA project.
+
+More detailed contribution guidelines will be added as the project matures.
+
+## License
+
+OpenMoH Arena is based on OpenMoHAA and includes software distributed under the **GNU General Public License version 2**.
+
+See:
+
+```text
+COPYING.txt
+```
+
+for the license text included with the project.
+
+Original OpenMoHAA copyright and attribution notices are preserved in accordance with the applicable license requirements.
+
+OpenMoH Arena modifications and additions to the GPL-covered codebase are distributed under the applicable GPL terms.
+
+## Game assets
+
+This repository does **not** provide the original commercial Medal of Honor: Allied Assault game assets.
+
+Users are responsible for obtaining any required original game data through lawful means.
+
+The open-source engine code and the original MOHAA game content are separate.
+
+## Disclaimer
+
+OpenMoH Arena is an independent community project.
+
+It is not affiliated with, sponsored by, or endorsed by Electronic Arts, the original Medal of Honor developers, or the OpenMoHAA maintainers.
+
+Medal of Honor and related names and assets may be trademarks or copyrighted works of their respective owners.
+
+## Links
+
+* MoHArena: https://moharena.com/
+* OpenMoHAA upstream: https://github.com/openmoh/openmohaa
+* OpenMoH Arena source: https://github.com/fecmtc/openmoh-arena
+
