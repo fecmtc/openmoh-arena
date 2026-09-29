@@ -84,10 +84,6 @@ lists what players see. In short:
   menu and the other MoH Arena features. The module loads only when Guard
   starts the game and the module file has the SHA-256 that Guard gives.
   In any other case the game runs like OpenMoHAA.
-* On Windows, `in_mouse -1` works like in the original game: the game reads
-  the Windows cursor, so the Windows pointer speed and "Enhance pointer
-  precision" apply. `in_mouse 1`, the default, keeps raw input. Run
-  `in_restart` after changing it.
 
 OpenMoH Arena uses the same network protocol as OpenMoHAA, so it joins the
 same servers.

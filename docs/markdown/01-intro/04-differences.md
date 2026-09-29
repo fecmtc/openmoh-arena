@@ -425,12 +425,6 @@ own differences.
   menu and the other MoH Arena features. The module loads only when MoH Arena
   Guard starts the game and the module file next to the exe has the SHA-256
   that Guard gives. In any other case the game runs like OpenMoHAA.
-- On Windows, `in_mouse -1` works like in the original game: the game reads
-  the Windows cursor instead of raw input, so the Windows pointer speed and
-  "Enhance pointer precision" apply. `in_mouse 1` (the default) keeps raw
-  input. Run `in_restart` after changing it. When the
-  `SDL_MOUSE_RELATIVE_MODE_WARP` environment variable is set, it still decides
-  instead.
 
 ## Planned features
 
