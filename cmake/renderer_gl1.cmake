@@ -40,6 +40,11 @@ set(RENDERER_GL1_SOURCES
     ${SOURCE_DIR}/renderergl1/tr_world.c
 )
 
+# Added in MoH Arena
+if(MOHARENA)
+    list(APPEND RENDERER_GL1_SOURCES ${SOURCE_DIR}/renderergl1/tr_moharena.c)
+endif()
+
 set(RENDERER_GL1_BASENAME renderer_opengl1)
 set(RENDERER_GL1_BINARY ${RENDERER_GL1_BASENAME})
 

@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "cl_ui.h"
 #include "../uilib/ui_public.h"
+#include "cl_moharena.h" // Added in MoH Arena
 
 /*
 
@@ -1088,6 +1089,12 @@ void CL_KeyEvent(int key, qboolean down, unsigned time)
         ctrl_down = down;
     }
 
+    // Added in MoH Arena
+    //  F7, and every key while the module's menu is open.
+    if (MoHArena_KeyEvent(key, down, time)) {
+        return;
+    }
+
     if (down && !CL_FinishedIntro()) {
         UI_StartStageKeyEvent();
         return;
@@ -1294,6 +1301,12 @@ void CL_CharEvent(int key)
 {
     // the console key should never be used as a char
     if (key == '`' || key == '~') {
+        return;
+    }
+
+    // Added in MoH Arena
+    //  Typed text goes to the module's menu while it is open.
+    if (MoHArena_CharEvent(key)) {
         return;
     }
 

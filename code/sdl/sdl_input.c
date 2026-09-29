@@ -1322,6 +1322,16 @@ void IN_Init( void *windowData )
 	SDL_StartTextInput( );
 
 	mouseAvailable = ( in_mouse->value != 0 );
+
+	// Added in MoH Arena
+	//  in_mouse -1 reads the Windows cursor, like the original game's Win32 mouse,
+	//  so the Windows pointer speed and acceleration apply; other values keep raw
+	//  input. SDL reads this each time the mouse is grabbed, and an
+	//  SDL_MOUSE_RELATIVE_MODE_WARP environment variable still wins.
+#ifdef _WIN32
+	SDL_SetHint( SDL_HINT_MOUSE_RELATIVE_MODE_WARP, in_mouse->integer == -1 ? "1" : "0" );
+#endif
+
 	IN_DeactivateMouse( Cvar_VariableIntegerValue( "r_fullscreen" ) != 0 );
 
 	appState = SDL_GetWindowFlags( SDL_window );

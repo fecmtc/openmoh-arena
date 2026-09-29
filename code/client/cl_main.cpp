@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "../server/server.h"
 #include "cl_ui.h"
+#include "cl_moharena.h" // Added in MoH Arena
 #include "../corepp/tiki.h"
 #include "../qcommon/cm_terrain.h"
 #include "../qcommon/localization.h"
@@ -806,6 +807,10 @@ void CL_ShutdownAll(qboolean shutdownRef) {
 	// su44: shutdown TIKI system, because it's dependent on renderer
 	TIKI_FreeAll();
 
+	// Added in MoH Arena
+	//  The module's textures go before the renderer's.
+	MoHArena_RenderShutdown();
+
 	// shutdown the renderer
 	if(shutdownRef)
 		CL_ShutdownRef();
@@ -851,6 +856,9 @@ void CL_MapLoading( qboolean flush, const char *pszMapName ) {
 
 	UI_ClearState();
 	UI_ForceMenuOff(false);
+
+	// Added in MoH Arena
+	MoHArena_MapLoading();
 
 	if (!flush) {
 		// Don't do anything if it's not flushingb
@@ -966,6 +974,9 @@ void CL_Disconnect() {
 	if ( !com_cl_running || !com_cl_running->integer ) {
 		return;
 	}
+
+	// Added in MoH Arena
+	MoHArena_Disconnected();
 
 	// shutting down the client so enter full screen ui mode
 	Cvar_Set("r_uiFullScreen", "1");
@@ -2433,6 +2444,7 @@ void CL_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
 	if ( !Q_stricmp(c, "print") ) {
 		s = MSG_ReadString( msg );
 		Q_strncpyz( clc.serverMessage, s, sizeof( clc.serverMessage ) );
+		MoHArena_ServerMessage(); // Added in MoH Arena
 		Com_Printf( "%s", s );
 		return;
 	}
@@ -2836,6 +2848,9 @@ void CL_Frame ( int msec ) {
     // Added in OPM
     CL_UpdateMouse();
 
+	// Added in MoH Arena
+	MoHArena_Frame();
+
 	// update the screen
 	SCR_UpdateScreen();
 
@@ -2898,6 +2913,9 @@ CL_ShutdownRef
 ============
 */
 void CL_ShutdownRef( void ) {
+	// Added in MoH Arena
+	MoHArena_RenderShutdown();
+
 	if ( re.Shutdown ) {
 		re.Shutdown( qtrue );
 	}
@@ -3764,6 +3782,10 @@ void CL_Init( void ) {
 
 	CL_StartHunkUsers(qfalse);
 
+	// Added in MoH Arena
+	//  Starts the module when the launcher asked for it.
+	MoHArena_Init();
+
 	end = Sys_Milliseconds();
 
 	if (com_gotOriginalConfig) {
@@ -3798,6 +3820,9 @@ void CL_Shutdown(const char* finalmsg, qboolean disconnect, qboolean quit) {
     recursive = qtrue;
 
     noGameRestart = quit;
+
+    // Added in MoH Arena
+    MoHArena_Shutdown(quit);
 
 	if(disconnect)
 		CL_Disconnect();

@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "cl_ui.h"
 #include "cl_uiradar.h"
+#include "cl_moharena.h" // Added in MoH Arena
 #include "../corepp/tiki.h"
 #include "../qcommon/localization.h"
 #include "../qcommon/bg_compat.h"
@@ -460,6 +461,9 @@ qboolean CL_GetServerCommand( int serverCommandNumber, qboolean differentServer 
 		cmd = Cmd_Argv(0);
 	}
 
+	// Added in MoH Arena
+	MoHArena_ServerCommand();
+
 	return CL_ProcessServerCommand(s, cmd, differentServer);
 }
 
@@ -535,6 +539,9 @@ CL_ShutdownCGame
 */
 void CL_ShutdownCGame( void ) {
 	cls.cgameStarted = qfalse;
+
+	// Added in MoH Arena
+	MoHArena_CGameUnloaded();
 
 	if( cge )
 	{
@@ -712,7 +719,9 @@ void CL_InitCGameDLL( clientGameImport_t *cgi, clientGameExport_t **cge ) {
 	cgi->get_camera_offset			= get_camera_offset;
 	
 	cgi->R_ClearScene				= re.ClearScene;
-	cgi->R_RenderScene				= re.RenderScene;
+	// Added in MoH Arena
+	//  The bridge keeps the last world view for the module, then renders.
+	cgi->R_RenderScene				= MoHArena_RenderScene;
 
 	cgi->R_LoadWorldMap				= re.LoadWorld;
 	cgi->R_PrintBSPFileSizes		= re.PrintBSPFileSizes;
@@ -972,6 +981,9 @@ void CL_InitCGame( void ) {
 	clc.state = CA_PRIMED;
 
 	CL_EndRegistration();
+
+	// Added in MoH Arena
+	MoHArena_CGameLoaded();
 
 	t2 = Sys_Milliseconds();
 

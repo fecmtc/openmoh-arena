@@ -414,6 +414,24 @@ Enable this feature with `set sv_netoptimize 2`.
 - Increased the DM message limit in multiplayer
 - Nocliping when dead no longer makes the player animation sketchy
 
+## OpenMoH Arena
+
+OpenMoH Arena is based on OpenMoHAA and keeps everything above. These are its
+own differences.
+
+### Client-side
+
+- Windows builds can load the MoH Arena Guard module, which adds the F7 Guard
+  menu and the other MoH Arena features. The module loads only when MoH Arena
+  Guard starts the game and the module file next to the exe has the SHA-256
+  that Guard gives. In any other case the game runs like OpenMoHAA.
+- On Windows, `in_mouse -1` works like in the original game: the game reads
+  the Windows cursor instead of raw input, so the Windows pointer speed and
+  "Enhance pointer precision" apply. `in_mouse 1` (the default) keeps raw
+  input. Run `in_restart` after changing it. When the
+  `SDL_MOUSE_RELATIVE_MODE_WARP` environment variable is set, it still decides
+  instead.
+
 ## Planned features
 
 This is a non-exhaustive list of objectives and planned features.

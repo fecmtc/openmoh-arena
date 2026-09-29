@@ -49,23 +49,60 @@ The Git tag for a release identifies the corresponding public source version.
 
 ## Binaries
 
-This repository is currently intended primarily for **source-code releases**.
+Each release on the
+[Releases page](https://github.com/fecmtc/openmoh-arena/releases) comes with
+Windows builds for x64 (64-bit Windows) and x86 (32-bit Windows).
 
-Official compiled OpenMoH Arena binaries may be distributed separately in the future.
+Each zip holds the game's executables and libraries, `COPYING.txt`,
+`SOURCE-OFFER.txt` and `SHA256SUMS.txt`. The release notes name the commit the
+builds were made from.
 
-The absence of binaries from this repository does not mean the project cannot be built from source.
+These are the builds that [MoH Arena Guard](https://moharena.com/anti-cheat)
+accepts.
+Guard checks the SHA-256 of `openmohaa.exe`, so it does not start a build made
+anywhere else, even from the same source.
+
+Builds for Linux and macOS are not published yet.
+
+## Installing on Windows
+
+1. Download the zip for your Windows: x64 for 64-bit Windows, x86 for 32-bit.
+2. Extract it into your Medal of Honor: Allied Assault folder, the one that
+   holds `main`.
+3. Start `launch_openmohaa_base.exe` (Allied Assault),
+   `launch_openmohaa_spearhead.exe` (Spearhead) or
+   `launch_openmohaa_breakthrough.exe` (Breakthrough), or pick one of them in
+   MoH Arena Guard.
+
+## Differences from OpenMoHAA
+
+The changes are marked `Added in MoH Arena` in the source, and the
+[differences page](docs/markdown/01-intro/04-differences.md#openmoh-arena)
+lists what players see. In short:
+
+* Windows builds can load the MoH Arena Guard module, which adds the F7 Guard
+  menu and the other MoH Arena features. The module loads only when Guard
+  starts the game and the module file has the SHA-256 that Guard gives.
+  In any other case the game runs like OpenMoHAA.
+* On Windows, `in_mouse -1` works like in the original game: the game reads
+  the Windows cursor, so the Windows pointer speed and "Enhance pointer
+  precision" apply. `in_mouse 1`, the default, keeps raw input. Run
+  `in_restart` after changing it.
+
+OpenMoH Arena uses the same network protocol as OpenMoHAA, so it joins the
+same servers.
 
 ## Building
 
-OpenMoH Arena inherits much of its build system from OpenMoHAA.
-
-The project uses CMake and supports multiple platforms.
-
-Build instructions will be documented here as the OpenMoH Arena build and release process is finalized.
-
-Until then, OpenMoHAA's upstream build system and documentation may be useful references:
+OpenMoH Arena builds like OpenMoHAA, with CMake. OpenMoHAA's build
+documentation applies:
 
 https://github.com/openmoh/openmohaa
+
+The MoH Arena bridge is off by default. The Windows release builds turn it on
+with `-DMOHARENA=ON`. The workflow that makes them,
+[moharena-windows.yml](.github/workflows/moharena-windows.yml), lists every
+library version and build option.
 
 ## Relationship to OpenMoHAA
 

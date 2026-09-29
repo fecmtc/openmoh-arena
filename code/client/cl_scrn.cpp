@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_ui.h"
+#include "cl_moharena.h" // Added in MoH Arena
 
 qboolean	scr_initialized;		// ready to draw
 stereoFrame_t	s_scr_stereoFrame;
@@ -502,6 +503,10 @@ void SCR_SimpleUpdateScreen( void ) {
 	else {
 		UpdateStereoSide( STEREO_CENTER );
 	}
+
+	// Added in MoH Arena
+	//  The module's menu, on top of everything the game drew.
+	MoHArena_Draw();
 
 	if( com_speeds->integer ) {
 		re.EndFrame( &time_frontend, &time_backend );

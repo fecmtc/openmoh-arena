@@ -39,6 +39,9 @@ option(USE_INTERNAL_VORBIS "Use internal copy of vorbis" ${USE_INTERNAL_LIBS})
 option(USE_INTERNAL_OPUS "Use internal copy of opus" ${USE_INTERNAL_LIBS})
 option(USE_INTERNAL_MAD "Use internal copy of libmad" ${USE_INTERNAL_LIBS})
 
+# Added in MoH Arena
+option(MOHARENA "Build the MoH Arena native bridge" OFF)
+
 # Release build by default, set externally if you want something else
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)

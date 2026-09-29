@@ -1,0 +1,30 @@
+OpenMoH Arena - written offer for source code
+=============================================
+
+This package contains openmohaa.exe, built from OpenMoH Arena, a modified
+version of OpenMoHAA. OpenMoHAA is free software under the GNU General
+Public License, version 2 or (at your option) any later version. The
+license is in COPYING.txt next to this file.
+
+For at least three years after the date of this build, the maintainers of
+OpenMoH Arena will give any third party, for a charge no more than the
+cost of physically performing the source distribution, a complete
+machine-readable copy of the corresponding source code of openmohaa.exe in
+this package, under the terms of the GNU General Public License, on a
+medium customarily used for software interchange.
+
+The same offer covers the source code of the libraries built for this
+package from their public releases:
+  - SDL2 (zlib license)
+  - OpenAL Soft (GNU Lesser General Public License, version 2 or later)
+  - curl (curl license)
+The exact versions are listed at the end of this file.
+
+The source code of each OpenMoH Arena release is published at:
+  https://github.com/fecmtc/openmoh-arena
+The release notes there name the commit each build was made from.
+
+To ask for the source code, open an issue at:
+  https://github.com/fecmtc/openmoh-arena/issues
+
+Please name the build you received (the commit below).

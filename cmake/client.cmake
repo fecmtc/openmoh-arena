@@ -65,6 +65,13 @@ list(APPEND CLIENT_SOURCES
 	${SOURCE_DIR}/gamespy/cl_gamespy.c
 )
 
+# Added in MoH Arena
+#  The bridge files build to empty stubs unless MOHARENA_NATIVE_BRIDGE is set on Windows.
+list(APPEND CLIENT_SOURCES
+    ${SOURCE_DIR}/client/cl_moharena.cpp
+    ${SOURCE_DIR}/client/cl_moharena_win32.cpp
+)
+
 file(GLOB_RECURSE UI_SOURCES "${SOURCE_DIR}/uilib/*.c" "${SOURCE_DIR}/uilib/*.cpp")
 
 add_git_dependency(${SOURCE_DIR}/client/cl_console.c)
@@ -127,6 +134,17 @@ if(NOT USE_RENDERER_DLOPEN)
     target_compile_definitions( ${CLIENT_BINARY} PRIVATE ${RENDERER_DEFINITIONS})
     target_compile_options(     ${CLIENT_BINARY} PRIVATE ${RENDERER_COMPILE_OPTIONS})
     target_link_libraries(      ${CLIENT_BINARY} PRIVATE ${RENDERER_LIBRARIES})
+endif()
+
+# Added in MoH Arena
+if(MOHARENA)
+    target_compile_definitions(${CLIENT_BINARY} PRIVATE MOHARENA_NATIVE_BRIDGE)
+    if(BUILD_RENDERER_GL1 AND NOT USE_RENDERER_DLOPEN)
+        target_compile_definitions(${CLIENT_BINARY} PRIVATE MOHARENA_RENDER_API)
+    endif()
+    if(WIN32)
+        target_link_libraries(${CLIENT_BINARY} PRIVATE bcrypt)
+    endif()
 endif()
 
 foreach(LIBRARY IN LISTS CLIENT_DEPLOY_LIBRARIES)

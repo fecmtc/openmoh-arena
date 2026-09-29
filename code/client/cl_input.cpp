@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_ui.h"
+#include "cl_moharena.h" // Added in MoH Arena
 
 unsigned	frame_msec;
 int			old_com_frameTime;
@@ -433,6 +434,12 @@ CL_MouseEvent
 =================
 */
 void CL_MouseEvent( int dx, int dy, int time ) {
+	// Added in MoH Arena
+	//  The module's cursor moves instead of the view while its menu is open.
+	if (MoHArena_MouseEvent(dx, dy)) {
+		return;
+	}
+
 	if( in_guimouse )
 	{
 		cl.mousex += dx;
@@ -754,6 +761,10 @@ usercmd_t CL_CreateCmd( void ) {
 
 	// store out the final values
 	CL_FinishMove( &cmd );
+
+	// Added in MoH Arena
+	//  The round countdown holds movement; the view stays free.
+	MoHArena_HoldMovement( &cmd );
 
 	// draw debug graphs of turning for mouse testing
 	if ( cl_debugMove->integer ) {
