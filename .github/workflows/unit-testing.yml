@@ -17,11 +17,13 @@ jobs:
     environment: "testing"
 
     steps:
-    - uses: awalsh128/cache-apt-pkgs-action@latest
-      name: Install required packages
-      with:
-        packages: flex bison ninja-build cmake clang libsdl2-dev libopenal-dev
-        version: "${{ runner.os }}-${{ runner.arch }}-unittest-v1"
+    # Added in MoH Arena: plain apt-get instead of awalsh128/cache-apt-pkgs-action.
+    # When apt failed, that action still saved an empty package cache, so every
+    # later run stopped at Configure CMake without SDL2.
+    - name: Install required packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y flex bison ninja-build cmake clang libsdl2-dev libopenal-dev
 
     - uses: actions/checkout@v4
       with:
