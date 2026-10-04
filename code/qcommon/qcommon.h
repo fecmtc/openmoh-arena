@@ -1365,6 +1365,8 @@ void	*Sys_GetGameAPI( void *parms );
 
 void	Sys_UnloadCGame( void );
 void	*Sys_GetCGameAPI( void *parms );
+// Added in MoH Arena: an optional export of the loaded cgame, or NULL
+void	*Sys_GetCGameFunction( const char *name );
 
 void	Sys_UnloadUI( void );
 void	*Sys_GetUIAPI( void );

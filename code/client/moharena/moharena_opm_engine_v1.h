@@ -53,6 +53,17 @@ enum {
     MOHARENA_OPM_CVAR_USERINFO = 0x2
 };
 
+/* What the bridge does beyond the services in its table: the bits of the
+ * engine table's `features`. A bridge from before a bit existed leaves it 0. */
+enum {
+    /* The bridge asks the module's filter_server_command about every "print"
+     * server command, and drops the ones it refuses. */
+    MOHARENA_OPM_FEATURE_PRINT_FILTER = 0x1,
+    /* In AA the bridge asks the module's kill_line_color about every death
+     * message, and shows the ones it names in green. */
+    MOHARENA_OPM_FEATURE_KILL_COLORS = 0x2
+};
+
 typedef struct MohArenaOpmClientStateV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -151,6 +162,12 @@ typedef int32_t (MOHARENA_CALL *MohArenaOpmDestroyTextureFn)(void *engine_contex
 typedef int32_t (MOHARENA_CALL *MohArenaOpmDrawTrianglesFn)(
     void *engine_context, const MohArenaDrawBatchV1 *batch);
 
+/* Sets the players whose taunt sounds the loaded cgame must not play: bit n
+ * of slot_mask is the player in slot n. Returns 1 when the loaded cgame
+ * applies the mask, and 0 when no cgame is loaded or the loaded one can't.
+ * The mask ends with that cgame: the next one starts with none. */
+typedef uint32_t (MOHARENA_CALL *MohArenaOpmSetVoiceMuteFn)(void *engine_context, uint64_t slot_mask);
+
 typedef struct MohArenaOpmEngineV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -162,7 +179,8 @@ typedef struct MohArenaOpmEngineV1 {
     int32_t cs_serverinfo;
     int32_t cs_players;
     int32_t cs_level_start_time;
-    uint32_t reserved0;
+    /* MOHARENA_OPM_FEATURE_* bits. It was a reserved field, always 0. */
+    uint32_t features;
     MohArenaOpmCvarGetFn cvar_get;
     MohArenaOpmCvarSetFn cvar_set;
     MohArenaOpmCvarRegisterFn cvar_register;
@@ -177,7 +195,10 @@ typedef struct MohArenaOpmEngineV1 {
     MohArenaOpmUpdateTextureFn update_texture;
     MohArenaOpmDestroyTextureFn destroy_texture;
     MohArenaOpmDrawTrianglesFn draw_triangles;
-    void *reserved[8];
+    /* Taken from the reserved fields, which a bridge always left null: the
+     * table's size stays. */
+    MohArenaOpmSetVoiceMuteFn set_voice_mute;
+    void *reserved[7];
 } MohArenaOpmEngineV1;
 
 /* Events the bridge sends through on_event. The module starts with the
@@ -226,6 +247,21 @@ typedef uint32_t (MOHARENA_CALL *MohArenaOpmHoldMovementFn)(void *module_context
  * module function afterwards, frees the textures the module left and never
  * unloads the module. */
 typedef void (MOHARENA_CALL *MohArenaOpmStopFn)(void *module_context);
+/* Asked about a server command before the cgame reads it, for the commands
+ * the engine's `features` name: nonzero drops the command, so the cgame never
+ * sees it, and on_server_command is not called for it. The cgame may ask for
+ * a command more than once: the answer must not change within a frame. */
+typedef uint32_t (MOHARENA_CALL *MohArenaOpmFilterServerCommandFn)(
+    void *module_context, uint32_t argc, const char *const *argv);
+
+/* Asked about an AA death message before the cgame prints it: the text of a
+ * "print" server command that starts with the game's red marker, the byte
+ * 0x04. `line` is that text, marker included. Nonzero shows the line in
+ * green; 0 leaves it red. The bridge asks after on_server_command, and never
+ * about a command the filter dropped. The cgame may ask for a command more
+ * than once: the last answer decides. */
+typedef uint32_t (MOHARENA_CALL *MohArenaOpmKillLineColorFn)(
+    void *module_context, const char *line);
 
 typedef struct MohArenaOpmModuleV1 {
     uint32_t abi_version;
@@ -240,7 +276,11 @@ typedef struct MohArenaOpmModuleV1 {
     MohArenaOpmServerCommandFn on_server_command;
     MohArenaOpmHoldMovementFn hold_movement;
     MohArenaOpmStopFn stop;
-    void *reserved[8];
+    /* Taken from the reserved fields, which a module always left null: the
+     * table's size stays. */
+    MohArenaOpmFilterServerCommandFn filter_server_command;
+    MohArenaOpmKillLineColorFn kill_line_color;
+    void *reserved[6];
 } MohArenaOpmModuleV1;
 
 #ifdef __cplusplus

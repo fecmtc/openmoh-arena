@@ -312,6 +312,24 @@ void* Sys_GetCGameAPI(void* parms)
     return GetCGameAPI(parms);
 }
 
+// Added in MoH Arena
+/*
+=================
+Sys_GetCGameFunction
+
+An optional export of the loaded cgame: NULL when no cgame is loaded
+or the loaded one has no such export
+=================
+*/
+void* Sys_GetCGameFunction(const char* name)
+{
+    if (!cgame_library) {
+        return NULL;
+    }
+
+    return Sys_LoadFunction(cgame_library, name);
+}
+
 void VM_Forced_Unload_Start(void) {
 }
 

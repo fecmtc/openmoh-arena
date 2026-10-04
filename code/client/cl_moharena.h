@@ -56,7 +56,8 @@ qboolean MoHArena_CharEvent(int ch);
 qboolean MoHArena_MouseEvent(int dx, int dy);
 
 // A server command the cgame is about to read, already split into Cmd_Argv.
-void MoHArena_ServerCommand(void);
+// Returns qtrue when the module dropped it: the cgame must not read it.
+qboolean MoHArena_ServerCommand(void);
 // clc.serverMessage has just changed.
 void MoHArena_ServerMessage(void);
 

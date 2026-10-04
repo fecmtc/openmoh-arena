@@ -462,7 +462,10 @@ qboolean CL_GetServerCommand( int serverCommandNumber, qboolean differentServer 
 	}
 
 	// Added in MoH Arena
-	MoHArena_ServerCommand();
+	// The cgame skips a command the module dropped, as it skips bcs0 and bcs1
+	if (MoHArena_ServerCommand()) {
+		return qfalse;
+	}
 
 	return CL_ProcessServerCommand(s, cmd, differentServer);
 }

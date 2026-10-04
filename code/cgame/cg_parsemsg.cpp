@@ -32,6 +32,33 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 extern int current_entity_number;
 
+// Added in MoH Arena
+// The personal mute's voice part: the client (client/cl_moharena.cpp) looks up the export below by name
+// and hands it the players whose taunt sounds must not play. Bit n of the mask is the player in slot n.
+#if defined(CGAME_DLL) && defined(_WIN32)
+#    define MOHARENA_CGAME_EXPORT __declspec(dllexport)
+#elif defined(CGAME_DLL)
+#    define MOHARENA_CGAME_EXPORT __attribute__((visibility("default")))
+#else
+#    define MOHARENA_CGAME_EXPORT
+#endif
+
+static uint64_t moharenaVoiceMuteMask;
+
+extern "C" MOHARENA_CGAME_EXPORT void MoHArena_SetVoiceMuteV1(uint64_t slotMask)
+{
+    moharenaVoiceMuteMask = slotMask;
+}
+
+static qboolean MoHArena_VoiceMuted(int slot)
+{
+    if (slot < 0 || slot >= 64) {
+        return qfalse;
+    }
+
+    return ((moharenaVoiceMuteMask >> slot) & 1) ? qtrue : qfalse;
+}
+
 typedef struct {
     vec3_t   i_vBarrel;
     vec3_t   i_vStart;
@@ -1632,6 +1659,12 @@ void CG_ParseCGMessage_ver_15()
                 iInfo     = cgi.MSG_ReadBits(6);
                 szTmp     = cgi.MSG_ReadString();
 
+                // Added in MoH Arena: a muted player's taunt is read in full, then neither played nor
+                // shown on the radar
+                if (MoHArena_VoiceMuted(iInfo)) {
+                    break;
+                }
+
                 iOldEnt = current_entity_number;
 
                 if (bLocal) {
@@ -2021,6 +2054,11 @@ void CG_ParseCGMessage_ver_6()
                 iInfo     = cgi.MSG_ReadBits(6);
                 szTmp     = cgi.MSG_ReadString();
 
+                // Added in MoH Arena: a muted player's taunt is read in full, then not played
+                if (MoHArena_VoiceMuted(iInfo)) {
+                    break;
+                }
+
                 iOldEnt = current_entity_number;
 
                 if (iLarge) {
@@ -2047,6 +2085,9 @@ void CG_ParseCGMessage_ver_6()
 
 void CG_InitCGMessageAPI(clientGameExport_t *cge)
 {
+    // Added in MoH Arena: a cgame starts with no player muted
+    moharenaVoiceMuteMask = 0;
+
     if (cg_protocol >= PROTOCOL_MOHTA_MIN) {
         cge->CG_ParseCGMessage = &CG_ParseCGMessage_ver_15;
     } else {

@@ -480,6 +480,27 @@ static int32_t MOHARENA_CALL MoHArena_ServerMessageGet(
     return 0;
 }
 
+// The cgame holds the mask and plays no taunt sound of a player in it (cgame/cg_parsemsg.cpp). The bridge
+// keeps nothing: it looks the export up in the cgame loaded now, and the next cgame starts with no mask.
+static uint32_t MOHARENA_CALL MoHArena_SetVoiceMute(void *context, uint64_t slotMask)
+{
+    typedef void (*setVoiceMute_t)(uint64_t slotMask);
+    setVoiceMute_t setVoiceMute;
+
+    (void)context;
+    if (!moharenaCGameLoaded) {
+        return 0;
+    }
+
+    setVoiceMute = reinterpret_cast<setVoiceMute_t>(Sys_GetCGameFunction("MoHArena_SetVoiceMuteV1"));
+    if (!setVoiceMute) {
+        return 0;
+    }
+
+    setVoiceMute(slotMask);
+    return 1;
+}
+
 #    ifdef MOHARENA_RENDER_API
 
 static qboolean MoHArena_RenderReady(void)
@@ -649,6 +670,9 @@ static void MoHArena_FillEngine(void)
     moharenaEngine.cs_serverinfo       = CS_SERVERINFO;
     moharenaEngine.cs_players          = CS_PLAYERS;
     moharenaEngine.cs_level_start_time = CS_LEVEL_START_TIME;
+    // MoHArena_ServerCommand asks the module's filter about every "print", and in AA its kill_line_color about
+    // every death message.
+    moharenaEngine.features            = MOHARENA_OPM_FEATURE_PRINT_FILTER | MOHARENA_OPM_FEATURE_KILL_COLORS;
     moharenaEngine.cvar_get            = MoHArena_CvarGet;
     moharenaEngine.cvar_set            = MoHArena_CvarSet;
     moharenaEngine.cvar_register       = MoHArena_CvarRegister;
@@ -658,6 +682,7 @@ static void MoHArena_FillEngine(void)
     moharenaEngine.entity              = MoHArena_Entity;
     moharenaEngine.last_view           = MoHArena_LastView;
     moharenaEngine.server_message      = MoHArena_ServerMessageGet;
+    moharenaEngine.set_voice_mute      = MoHArena_SetVoiceMute;
 
 #    ifdef MOHARENA_RENDER_API
     moharenaRender = GetMoHArenaRenderAPI(MOHARENA_RENDER_API_VERSION);
@@ -1203,19 +1228,19 @@ qboolean MoHArena_MouseEvent(int dx, int dy)
     return used ? qtrue : qfalse;
 }
 
-void MoHArena_ServerCommand(void)
+qboolean MoHArena_ServerCommand(void)
 {
     static const char *args[MOHARENA_SERVER_ARGS_MAX];
     int                count;
     int                i;
 
     if (!moharenaRunning) {
-        return;
+        return qfalse;
     }
 
     count = Cmd_Argc();
     if (count <= 0) {
-        return;
+        return qfalse;
     }
 
     if (count > MOHARENA_SERVER_ARGS_MAX) {
@@ -1226,7 +1251,27 @@ void MoHArena_ServerCommand(void)
         args[i] = Cmd_Argv(i);
     }
 
+    // The module's filter sees every "print" first; an older module has none. A command it drops goes no
+    // further: on_server_command is not called for it, and the cgame never reads it.
+    if (moharenaModule.filter_server_command && !strcmp(args[0], "print")
+        && moharenaModule.filter_server_command(moharenaModule.module_context, (uint32_t)count, args)) {
+        return qtrue;
+    }
+
     moharenaModule.on_server_command(moharenaModule.module_context, (uint32_t)count, args);
+
+    // An AA server sends every death message as a red "print". The module names the ones to show in green, and
+    // the bridge writes the green marker over the red one before the cgame prints the text; an older module has
+    // no such call. The cgame reads a command twice in a frame and each read splits it afresh, so the bridge
+    // asks and writes on every read.
+    if (moharenaModule.kill_line_color && moharenaEngine.target_game == MOHARENA_OPM_GAME_AA && count >= 2
+        && !strcmp(args[0], "print") && args[1][0] == MESSAGE_CHAT_RED
+        && moharenaModule.kill_line_color(moharenaModule.module_context, args[1])) {
+        // count >= 2, so this is the command's own text and never the shared empty string
+        Cmd_Argv(1)[0] = MESSAGE_CHAT_GREEN;
+    }
+
+    return qfalse;
 }
 
 void MoHArena_ServerMessage(void)
@@ -1322,7 +1367,10 @@ qboolean MoHArena_MouseEvent(int dx, int dy)
     return qfalse;
 }
 
-void MoHArena_ServerCommand(void) {}
+qboolean MoHArena_ServerCommand(void)
+{
+    return qfalse;
+}
 
 void MoHArena_ServerMessage(void) {}
 
