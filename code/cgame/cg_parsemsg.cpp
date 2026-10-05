@@ -59,6 +59,39 @@ static qboolean MoHArena_VoiceMuted(int slot)
     return ((moharenaVoiceMuteMask >> slot) & 1) ? qtrue : qfalse;
 }
 
+// Added in MoH Arena
+// The sniper scopes: the client (client/cl_moharena.cpp) looks up the export below by name and hands it the
+// scopes the player chose in the MoH Arena menu. A struct this cgame can't read gives both rifles' scopes back to
+// the game. CG_DrawZoomOverlay (cg_drawtools.cpp) draws them.
+#include "../client/moharena/moharena_scope_v1.h"
+
+static MohArenaScopeV1 moharenaScope;
+
+extern "C" MOHARENA_CGAME_EXPORT uint32_t MoHArena_SetScopeV1(const MohArenaScopeV1 *scope)
+{
+    if (!moharena_scope_readable(scope)) {
+        memset(&moharenaScope, 0, sizeof(moharenaScope));
+        return 0;
+    }
+
+    moharenaScope = *scope;
+    return 1;
+}
+
+// The entry for a zoom type of CG_DrawZoomOverlay: 1 is the scoped KAR98, 0 every other scoped rifle. NULL for the
+// binoculars and the spy camera, which stay the game's.
+const MohArenaScopeRifleV1 *MoHArena_ScopeRifle(int zoomType)
+{
+    switch (zoomType) {
+    case 0:
+        return &moharenaScope.allies;
+    case 1:
+        return &moharenaScope.axis;
+    default:
+        return NULL;
+    }
+}
+
 typedef struct {
     vec3_t   i_vBarrel;
     vec3_t   i_vStart;
@@ -2087,6 +2120,8 @@ void CG_InitCGMessageAPI(clientGameExport_t *cge)
 {
     // Added in MoH Arena: a cgame starts with no player muted
     moharenaVoiceMuteMask = 0;
+    // Added in MoH Arena: and with the game's own sniper scopes
+    memset(&moharenaScope, 0, sizeof(moharenaScope));
 
     if (cg_protocol >= PROTOCOL_MOHTA_MIN) {
         cge->CG_ParseCGMessage = &CG_ParseCGMessage_ver_15;

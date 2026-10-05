@@ -168,6 +168,13 @@ typedef int32_t (MOHARENA_CALL *MohArenaOpmDrawTrianglesFn)(
  * The mask ends with that cgame: the next one starts with none. */
 typedef uint32_t (MOHARENA_CALL *MohArenaOpmSetVoiceMuteFn)(void *engine_context, uint64_t slot_mask);
 
+/* Sets the sniper scopes the loaded cgame draws (moharena_scope_v1.h). The
+ * cgame keeps a copy. Returns 1 when the loaded cgame took the scope, and 0
+ * when no cgame is loaded, the loaded one has no such call, or the struct is
+ * one it can't read: it then draws the game's own scopes. The scope ends with
+ * that cgame: the next one starts with the game's own. */
+typedef uint32_t (MOHARENA_CALL *MohArenaOpmSetScopeFn)(void *engine_context, const MohArenaScopeV1 *scope);
+
 typedef struct MohArenaOpmEngineV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -198,7 +205,8 @@ typedef struct MohArenaOpmEngineV1 {
     /* Taken from the reserved fields, which a bridge always left null: the
      * table's size stays. */
     MohArenaOpmSetVoiceMuteFn set_voice_mute;
-    void *reserved[7];
+    MohArenaOpmSetScopeFn set_scope;
+    void *reserved[6];
 } MohArenaOpmEngineV1;
 
 /* Events the bridge sends through on_event. The module starts with the

@@ -501,6 +501,27 @@ static uint32_t MOHARENA_CALL MoHArena_SetVoiceMute(void *context, uint64_t slot
     return 1;
 }
 
+// The cgame holds the sniper scopes and draws them in place of the game's own (cgame/cg_drawtools.cpp). The
+// bridge keeps nothing: it looks the export up in the cgame loaded now and hands that cgame's answer back, and
+// the next cgame starts with the game's own scopes.
+static uint32_t MOHARENA_CALL MoHArena_SetScope(void *context, const MohArenaScopeV1 *scope)
+{
+    typedef uint32_t (*setScope_t)(const MohArenaScopeV1 *scope);
+    setScope_t setScope;
+
+    (void)context;
+    if (!moharenaCGameLoaded) {
+        return 0;
+    }
+
+    setScope = reinterpret_cast<setScope_t>(Sys_GetCGameFunction("MoHArena_SetScopeV1"));
+    if (!setScope) {
+        return 0;
+    }
+
+    return setScope(scope) ? 1 : 0;
+}
+
 #    ifdef MOHARENA_RENDER_API
 
 static qboolean MoHArena_RenderReady(void)
@@ -683,6 +704,7 @@ static void MoHArena_FillEngine(void)
     moharenaEngine.last_view           = MoHArena_LastView;
     moharenaEngine.server_message      = MoHArena_ServerMessageGet;
     moharenaEngine.set_voice_mute      = MoHArena_SetVoiceMute;
+    moharenaEngine.set_scope           = MoHArena_SetScope;
 
 #    ifdef MOHARENA_RENDER_API
     moharenaRender = GetMoHArenaRenderAPI(MOHARENA_RENDER_API_VERSION);

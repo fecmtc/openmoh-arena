@@ -492,6 +492,99 @@ void CG_DrawOverlayFullScreen(qhandle_t handle, float fAlpha)
     cgi.R_DrawStretchPic(iHalfWidth, iHalfHeight, iHalfWidth, iHalfHeight, 1.0, 1.0, 0.0, 0.0, handle);
 }
 
+// Added in MoH Arena
+// A rifle's scope as the player chose it in the MoH Arena menu (client/moharena/moharena_scope_v1.h): a lens of the
+// game's own pictures, the game's two side bars, then the black quads of a custom reticle. The order, the colors
+// and the alpha are those of CG_DrawOverlayMiddle and CG_DrawOverlayTopBottom above. Returns qfalse and draws
+// nothing when the game draws this scope itself: the zoom type has no entry (the binoculars and the spy camera),
+// the entry names the game's own lens, or it was not built for the square this view has.
+#include "../client/moharena/moharena_scope_v1.h"
+
+const MohArenaScopeRifleV1 *MoHArena_ScopeRifle(int zoomType); // cg_parsemsg.cpp
+
+static qboolean MoHArena_DrawScope(int zoomType, float fAlpha)
+{
+    const MohArenaScopeRifleV1 *rifle;
+    MohArenaScopeLensQuadV1     lens[4];
+    qhandle_t                   pictures[3];
+    int                         iHalfWidth;
+    int                         iWidthOffset;
+    vec4_t                      color;
+    uint32_t                    i;
+
+    rifle = MoHArena_ScopeRifle(zoomType);
+    if (!rifle || rifle->lens == (uint32_t)MOHARENA_SCOPE_LENS_GAME) {
+        return qfalse;
+    }
+
+    iHalfWidth   = cgs.glconfig.vidHeight >> 1;
+    iWidthOffset = (cgs.glconfig.vidWidth - cgs.glconfig.vidHeight) >> 1;
+
+    // The entry fits this very square, and all four lens quads are worked out before the first is drawn
+    if (!moharena_scope_rifle_ok(rifle, (uint32_t)(2 * iHalfWidth))) {
+        return qfalse;
+    }
+
+    for (i = 0; i < 4; i++) {
+        if (!moharena_scope_lens_quad(rifle->lens, i, iHalfWidth, &lens[i])) {
+            return qfalse;
+        }
+    }
+
+    pictures[MOHARENA_SCOPE_PICTURE_ALLIED]     = cgs.media.zoomOverlayShader;
+    pictures[MOHARENA_SCOPE_PICTURE_KAR_TOP]    = cgs.media.kar98TopOverlayShader;
+    pictures[MOHARENA_SCOPE_PICTURE_KAR_BOTTOM] = cgs.media.kar98BottomOverlayShader;
+
+    color[0] = 1.0;
+    color[1] = 1.0;
+    color[2] = 1.0;
+    color[3] = fAlpha;
+    cgi.R_SetColor(color);
+
+    for (i = 0; i < 4; i++) {
+        cgi.R_DrawStretchPic(
+            iWidthOffset + lens[i].x,
+            lens[i].y,
+            lens[i].w,
+            lens[i].h,
+            lens[i].s1,
+            lens[i].t1,
+            lens[i].s2,
+            lens[i].t2,
+            pictures[lens[i].picture]
+        );
+    }
+
+    color[0] = 0.0;
+    color[1] = 0.0;
+    color[2] = 0.0;
+    cgi.R_SetColor(color);
+
+    cgi.R_DrawStretchPic(0.0, 0.0, iWidthOffset, cgs.glconfig.vidHeight, 0.0, 0.0, 1.0, 1.0, cgs.media.lagometerShader);
+    cgi.R_DrawStretchPic(
+        cgs.glconfig.vidWidth - iWidthOffset,
+        0.0,
+        iWidthOffset,
+        cgs.glconfig.vidHeight,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        cgs.media.lagometerShader
+    );
+
+    // The reticle, from the square's top left, with the side bars' color, shader and texture coordinates
+    for (i = 0; i < rifle->quad_count; i++) {
+        const MohArenaScopeQuadV1 *quad = &rifle->quads[i];
+
+        cgi.R_DrawStretchPic(
+            iWidthOffset + quad->x, quad->y, quad->w, quad->h, 0.0, 0.0, 1.0, 1.0, cgs.media.lagometerShader
+        );
+    }
+
+    return qtrue;
+}
+
 void CG_DrawZoomOverlay()
 {
     static int   zoomType;
@@ -540,6 +633,11 @@ void CG_DrawZoomOverlay()
         if (!fAlpha) {
             return;
         }
+    }
+
+    // Added in MoH Arena: a rifle's scope the player chose in the MoH Arena menu, in place of the game's own
+    if (MoHArena_DrawScope(zoomType, fAlpha)) {
+        return;
     }
 
     switch (zoomType) {

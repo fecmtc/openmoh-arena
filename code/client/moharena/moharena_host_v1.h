@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "moharena_scope_v1.h"
+
 #if defined(_WIN32)
 #define MOHARENA_CALL __cdecl
 #else
