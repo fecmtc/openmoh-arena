@@ -35,10 +35,11 @@ typedef enum {
 class UIDMBox : public UIWidget
 {
     struct item_t {
-        str     string;
-        UColor  color;
-        UIFont *font;
-        int     flags;
+        str      string;
+        UColor   color;
+        UIFont  *font;
+        int      flags;
+        uint64_t stableId; /* Added in Omaha: foreach lifetime key */
     };
 
 protected:
@@ -79,6 +80,8 @@ public:
     void MoveInEvent(Event *ev);
     void DecayEvent(Event *ev);
     void Draw(void) override;
+    /* Added in Omaha: Phase 1 — modern HUD only publishes rows; skip Set2DWindow. */
+    void Display(const UIRect2D& drawframe, float parent_alpha) override;
     void setRealShow(bool b);
     void Clear(void);
 };

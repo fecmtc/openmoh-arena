@@ -813,8 +813,15 @@ static void R_MarkLeaves (void) {
 	// hasn't changed, we don't need to mark everything again
 
 	// if r_showcluster was just turned on, remark everything 
+	//
+	// Fixed in Omaha: viewCluster == -1 is the "force remark" sentinel used after
+	// map/menu-world loads. Cameras outside the world also report cluster -1, so
+	// treating (-1 == -1) as a hit skips marking forever (Algiers / Southern France
+	// menu backdrops: brushes vanish, static models still draw).
+	// Changed in MoH Arena: that extra check (the last line) is only made with the modern UI.
 	if ( tr.viewCluster == cluster && !tr.refdef.areamaskModified 
-		&& !r_showcluster->modified ) {
+		&& !r_showcluster->modified
+		&& !( R_ModernUI() && tr.viewCluster == -1 ) ) {
 		return;
 	}
 

@@ -21,6 +21,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "cl_ui.h"
+#include "cl_uirender.h"
+#include "cl_messages_host.h"
 #include "../qcommon/localization.h"
 
 Event EV_GMBox_Goin
@@ -136,6 +138,11 @@ void UIGMBox::PostMoveinEvent(void)
 
 void UIGMBox::PostDecayEvent(void)
 {
+    /* Changed in Omaha: modern HUD foreach lifetime owns expiry; capacity trim only. */
+    if (CL_UIR_UseModernHudPack()) {
+        return;
+    }
+
     if (!EventPending(EV_GMBox_Decay)) {
         float       fDelayTime;
         int         iNumLines;
@@ -287,11 +294,19 @@ void UIGMBox::Print(const char *text)
 {
     const char *text1 = text;
 
-    if (m_numitems > 4) {
-        //
-        // Overwrite an item
-        //
-        RemoveTopItem();
+    // Changed in MoH Arena: the modern UI has its own row cap
+    if (MoHArena_ModernUI()) {
+        /* Changed in Omaha: capacity aligned with UIR_HUD_GAME_MESSAGES_MAX_ROWS. */
+        if (m_numitems >= UIR_HUD_GAME_MESSAGES_MAX_ROWS) {
+            RemoveTopItem();
+        }
+    } else {
+        if (m_numitems > 4) {
+            //
+            // Overwrite an item
+            //
+            RemoveTopItem();
+        }
     }
 
     m_items[m_numitems].flags = 0;
@@ -307,8 +322,21 @@ void UIGMBox::Print(const char *text)
         m_items[m_numitems].font  = m_font;
     }
 
-    m_items[m_numitems].string =
-        CalculateBreaks(m_items[m_numitems].font, Sys_LV_CL_ConvertString(text1), s_gmboxWidth);
+    // Changed in MoH Arena: the 64 px floor is for the modern UI only
+    if (MoHArena_ModernUI()) {
+        m_items[m_numitems].string =
+            CalculateBreaks(m_items[m_numitems].font, Sys_LV_CL_ConvertString(text1),
+                            s_gmboxWidth < 64.0f ? 64.0f : s_gmboxWidth);
+    } else {
+        m_items[m_numitems].string =
+            CalculateBreaks(m_items[m_numitems].font, Sys_LV_CL_ConvertString(text1), s_gmboxWidth);
+    }
+
+    /* Added in Omaha: monotonic id for hud-game-messages foreach lifetime. */
+    {
+        static uint64_t s_nextHudGameMessageId = 1;
+        m_items[m_numitems].stableId = s_nextHudGameMessageId++;
+    }
 
     m_numitems++;
     VerifyBoxOut();
@@ -362,9 +390,50 @@ void UIGMBox::Draw(void)
     HandleBoxMoving();
 
     if (!m_numitems) {
+        if (CL_UIR_UseModernHudPack()) {
+            /* Fixed in Omaha: only publish empty when rows were present (avoid per-frame revision thrash). */
+            if (UIR_HudGameMessages_GetRowCount() > 0) {
+                UIR_HudGameMessages_Clear();
+                UIR_HudGameMessages_NotifyChanged();
+            }
+        }
         //
         // Nothing to show
         //
+        return;
+    }
+
+    /* Added in Omaha: modern HUD pack paints game messages via hud-game-messages collection. */
+    if (CL_UIR_UseModernHudPack()) {
+        uir_hud_message_input_t row;
+
+        if (!m_numitems) {
+            if (UIR_HudGameMessages_GetRowCount() > 0) {
+                UIR_HudGameMessages_Clear();
+                UIR_HudGameMessages_NotifyChanged();
+            }
+            return;
+        }
+
+        alphaScale = 1.0f;
+        if (cge) {
+            alphaScale = static_cast<float>(1.0 - cge->CG_GetObjectiveAlpha());
+        }
+
+        UIR_HudGameMessages_Clear();
+        UIR_HudGameMessages_SetAlphaScale(alphaScale);
+        for (i = 0; i < m_numitems; i++) {
+            std::memset(&row, 0, sizeof(row));
+            row.text = m_items[i].string.c_str();
+            row.colorR = m_items[i].color.r;
+            row.colorG = m_items[i].color.g;
+            row.colorB = m_items[i].color.b;
+            row.colorA = m_items[i].color.a;
+            row.bold = (m_items[i].flags & GMBOX_ITEM_FLAG_BOLD) ? 1 : 0;
+            row.stableId = m_items[i].stableId;
+            UIR_HudGameMessages_AddRow(&row);
+        }
+        UIR_HudGameMessages_NotifyChanged();
         return;
     }
 
@@ -397,6 +466,24 @@ void UIGMBox::Draw(void)
             break;
         }
     }
+}
+
+void UIGMBox::Display(const UIRect2D& drawframe, float parent_alpha)
+{
+    /* Added in Omaha: Phase 1 — modern path only feeds hud collections; Set2DWindow is wasted. */
+    if (CL_UIR_UseModernHudPack()) {
+        if (!isEnabled()) {
+            lastShowTime = -1;
+            return;
+        }
+        if (!m_enabledCvar.length() && !IsVisible()) {
+            return;
+        }
+        m_local_alpha = m_alpha * parent_alpha;
+        Draw();
+        return;
+    }
+    UIWidget::Display(drawframe, parent_alpha);
 }
 
 void UIGMBox::setRealShow(bool b)

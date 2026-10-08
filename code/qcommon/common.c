@@ -43,6 +43,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #ifndef DEDICATED
 #  include "../uilib/ui_public.h"
+void CL_UIR_SyncPointerMenus(void);
 #endif
 
 #include "../gamespy/q_gamespy.h"
@@ -1706,6 +1707,72 @@ qboolean Com_ConfigExists(const char* configname) {
 	return qtrue;
 }
 
+// Added in MoH Arena: qtrue when the game was started with the modern UI
+static qboolean moharenaModernUI;
+
+#ifndef DEDICATED
+// Added in MoH Arena: qtrue when the modern UI was asked for and its files were not found
+static qboolean moharenaModernUIFilesMissing;
+#endif
+
+/*
+=================
+MoHArena_ModernUI
+
+Added in MoH Arena: qtrue when the game was started with the modern UI.
+The original UI is the default. The answer never changes while the game runs.
+=================
+*/
+qboolean MoHArena_ModernUI( void ) {
+	return moharenaModernUI;
+}
+
+/*
+=================
+MoHArena_InitUIMode
+
+Added in MoH Arena: registers ui_legacy, the switch between the two UIs.
+1 is the original game and the default. The launcher passes 0 for the modern UI.
+Any other value counts as 1, so that every part of the game reads the same mode.
+=================
+*/
+static void MoHArena_InitUIMode( void ) {
+#ifndef DEDICATED
+	cvar_t *legacy = Cvar_Get( "ui_legacy", "1", CVAR_INIT );
+
+	if ( strcmp( legacy->string, "0" ) ) {
+		Cvar_Set( "ui_legacy", "1" );
+	}
+	moharenaModernUI = legacy->integer ? qfalse : qtrue;
+#endif
+}
+
+/*
+=================
+MoHArena_CheckModernUIFiles
+
+Added in MoH Arena: the modern UI cannot show its main menu without its files.
+When the file of that menu is not found, the game goes on with the original UI.
+Called once, after the file system is up and before anything else reads the mode.
+The log file opens later, so Com_Init says it at its end, where the line reaches the log.
+=================
+*/
+static void MoHArena_CheckModernUIFiles( void ) {
+#ifndef DEDICATED
+	if ( !moharenaModernUI ) {
+		return;
+	}
+	// the file of the menu "main", as in moharenaUIMenuFiles of cl_moharena_uipolicy.cpp
+	if ( FS_FOpenFileRead( "ui/modern/main.xml", NULL, qfalse, qtrue ) > 0 ) {
+		return;
+	}
+
+	moharenaModernUIFilesMissing = qtrue;
+	Cvar_Set( "ui_legacy", "1" );
+	moharenaModernUI = qfalse;
+#endif
+}
+
 /*
 =================
 Com_Init
@@ -1752,6 +1819,9 @@ void Com_Init( char *commandLine ) {
 	// override anything from the config files with command line args
 	Com_StartupVariable( NULL );
 
+	// Added in MoH Arena: read the UI mode before anything depends on it
+	MoHArena_InitUIMode();
+
 	// get the developer cvar set as early as possible
 	Com_StartupVariable( "developer" );
 
@@ -1773,6 +1843,9 @@ void Com_Init( char *commandLine ) {
     }
 
 	FS_InitFilesystem ();
+
+	// Added in MoH Arena: without its files the modern UI is not used
+	MoHArena_CheckModernUIFiles();
 
 	Com_InitJournaling();
 
@@ -2023,6 +2096,13 @@ void Com_Init( char *commandLine ) {
 
 	iEnd = Sys_Milliseconds();
 	Com_Printf( "--- Common Initialization Complete --- %i ms\n", iEnd - iStart );
+
+#ifndef DEDICATED
+	// Added in MoH Arena: said here, where the log file is open
+	if ( moharenaModernUIFilesMissing ) {
+		Com_Printf( "The files of the modern UI were not found (main/zz_moharena_ui.pk3): using the original UI\n" );
+	}
+#endif
 }
 
 /*
@@ -2345,6 +2425,13 @@ void Com_Frame( void ) {
     } while (Com_TimeVal(minMsec));
 
     IN_Frame();
+
+#ifndef DEDICATED
+    // Changed in MoH Arena: only with the modern UI
+    if (!com_dedicated->integer && MoHArena_ModernUI()) {
+        CL_UIR_SyncPointerMenus();
+    }
+#endif
 
     lastTime = com_frameTime;
     com_frameTime = Com_EventLoop();

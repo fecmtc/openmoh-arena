@@ -998,6 +998,7 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
     const char    *szTagName;
     int            iAnimFlags;
     qboolean       bThirdPerson = qfalse;
+    qboolean       spectateFpHide = qfalse;
 
     s1 = &cent->currentState;
 
@@ -1005,6 +1006,20 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
     // Fixed in OPM
     //  Draw world model body when in camera
     bThirdPerson |= (cg.snap->ps.pm_flags & PMF_CAMERA_VIEW && !(cg.snap->ps.pm_flags & PMF_TURRET));
+
+    /*
+     * Added in Omaha: FP spectate — hide followed body / attachments / local chase
+     * ghost, but still run anims + ClientCommands so gunshot frame sounds fire.
+     * Early return previously muted weapon sounds and broke attach parents.
+     */
+    // Changed in MoH Arena: first-person spectate belongs to the modern UI
+    if (CG_ModernUI() && CG_SpectateFP_Active()) {
+        const int followClient = CG_SpectateFP_FollowClient();
+        if (s1->number == followClient || s1->parent == followClient
+            || s1->number == cg.snap->ps.clientNum || s1->parent == cg.snap->ps.clientNum) {
+            spectateFpHide = qtrue;
+        }
+    }
 
     if ((cg.snap->ps.pm_flags & PMF_INTERMISSION) && s1->number == cg.snap->ps.clientNum && !bThirdPerson) {
         // Don't render the first-person model during intermission
@@ -1277,6 +1292,13 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
 
     // set surfaces
     memcpy(model.surfaces, s1->surfaces, MAX_MODEL_SURFACES);
+
+    /* Added in Omaha: invisible but still in the scene (attach + frame cmds). */
+    if (spectateFpHide) {
+        for (i = 0; i < MAX_MODEL_SURFACES; i++) {
+            model.surfaces[i] |= MDL_SURFACE_NODRAW;
+        }
+    }
 
     if (!(s1->renderfx & RF_ALWAYSDRAW) && s1->parent != ENTITYNUM_NONE && s1->parent == cg.snap->ps.clientNum
         && ((!cg_drawviewmodel->integer && !bThirdPerson) || cg.snap->ps.stats[STAT_INZOOM])) {

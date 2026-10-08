@@ -24,9 +24,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // Init functions for the cgame
 
 #include "cg_local.h"
+#include "cg_hitmarker.h"
 #include "cg_parsemsg.h"
 #include "cg_archive.h"
 #include "cg_radar.h"
+// Added in MoH Arena: the limit of cg_shadows in the modern UI
+#include "../qcommon/moharena_limits.h"
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -79,11 +82,14 @@ cvar_t *cg_animationviewmodel;
 cvar_t *cg_hitmessages;
 cvar_t *cg_acidtrip;
 cvar_t *cg_hud;
+cvar_t *cg_hud_push_cache; /* Added in Omaha: Phase 4.5 */
 cvar_t *cg_huddraw_force;
 cvar_t *cg_drawsvlag;
 cvar_t *cg_crosshair;
 cvar_t *cg_crosshair_friend;
 cvar_t *ui_crosshair;
+cvar_t *ui_legacy;
+cvar_t *ui_om_hud;
 cvar_t *vm_offset_max;
 cvar_t *vm_offset_speed;
 cvar_t *vm_sway_front;
@@ -116,6 +122,7 @@ cvar_t *ui_timemessage;
 // Added in OPM
 //
 cvar_t *cg_fov;
+cvar_t *cg_zoomSensitivity; /* Added in Omaha: off | legacy | screen */
 cvar_t *cg_cheats;
 
 /*
@@ -176,6 +183,21 @@ void CG_RegisterCvars(void)
     // as it doesn't have crosshair_friend texture
     cg_crosshair_friend = cgi.Cvar_Get("cg_crosshair_friend", "textures/hud/crosshair_friend", CVAR_ARCHIVE);
     ui_crosshair                  = cgi.Cvar_Get("ui_crosshair", "1", CVAR_ARCHIVE);
+
+    // Added in MoH Arena: the original UI is the default
+    ui_legacy                     = cgi.Cvar_Get("ui_legacy", "1", CVAR_INIT);
+    // Added in MoH Arena: what the modern UI adds is registered only for the modern UI
+    if (CG_ModernUI()) {
+        ui_om_hud = cgi.Cvar_Get("ui_om_hud", "classic", CVAR_ARCHIVE);
+        /* Added in Omaha: Phase 4.5 — skip unchanged ui_om_hud_* Cvar_Set. */
+        cg_hud_push_cache = cgi.Cvar_Get("cg_hud_push_cache", "1", 0);
+        /* Added in Omaha: off | legacy | screen */
+        cg_zoomSensitivity = cgi.Cvar_Get("cg_zoomSensitivity", "legacy", CVAR_ARCHIVE);
+        CG_Hitmarker_RegisterCvars(); /* Added in Omaha */
+        CG_SpectateFP_RegisterCvars();
+        // the highest cg_shadows of the modern UI
+        cgi.Cvar_CheckRange(cg_shadows, 0, MOHARENA_SHADOWS_MAX, qtrue);
+    }
     vm_offset_max                 = cgi.Cvar_Get("vm_offset_max", "8.0", 0);
     vm_offset_speed               = cgi.Cvar_Get("vm_offset_speed", "8.0", 0);
     vm_sway_front                 = cgi.Cvar_Get("vm_sway_front", "0.1", 0);
@@ -730,6 +752,10 @@ void CG_Init(clientGameImport_t *imported, int serverMessageNum, int serverComma
     cgs.serverCommandSequence = serverCommandSequence;
 
     CG_RegisterCvars();
+    // Added in MoH Arena: the HUD cache belongs to the modern UI
+    if (CG_ModernUI()) {
+        CG_HudPushCacheReset(); /* Added in Omaha: Phase 4.5 */
+    }
 
     L_InitEvents();
 
@@ -819,6 +845,8 @@ clientGameExport_t *GetCGameAPI(void)
     cge.CG_ConsoleCommand           = CG_ConsoleCommand;
     cge.CG_GetRendererConfig        = CG_GetRendererConfig;
     cge.CG_Draw2D                   = CG_Draw2D;
+    cge.CG_DrawZoomOverlay          = CG_DrawZoomOverlay; /* Added in Omaha */
+    cge.CG_SyncModernHudCvars       = CG_SyncModernHudCvars;
     cge.CG_EyePosition              = CG_EyePosition;
     cge.CG_EyeOffset                = CG_EyeOffset;
     cge.CG_EyeAngles                = CG_EyeAngles;

@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "cg_parsemsg.h"
+// Added in MoH Arena: the limits of cg_fov in the modern UI
+#include "../qcommon/moharena_limits.h"
 
 //============================================================================
 
@@ -524,6 +526,32 @@ static int CG_CalcFov(void)
     cg.fRefFovYCos     = cos(fov_y / 114.0f);
     cg.fRefFovYSin     = sin(fov_y / 114.0f);
     cg.zoomSensitivity = cg.refdef.fov_y / 75.0;
+
+    /*
+     * Changed in Omaha: cg_zoomSensitivity mode for modern UI (ui_legacy 0):
+     *   off    -> 1.0 (no FOV scale)
+     *   legacy -> fov_y / 75 (retail Quake)
+     *   screen -> tan(zoom/2)/tan(hip/2) (screen-distance)
+     * Legacy UI always uses fov_y/75.
+     */
+    // Changed in MoH Arena: "legacy", an empty value and an unknown value all keep the original line above
+    if (CG_ModernUI() && cg_zoomSensitivity) {
+        if (!Q_stricmp(cg_zoomSensitivity->string, "off")) {
+            cg.zoomSensitivity = 1.0f;
+        } else if (!Q_stricmp(cg_zoomSensitivity->string, "screen")) {
+            float hipFov = cg_fov ? cg_fov->value : 80.0f;
+            float zoomFov = cg.camera_fov;
+
+            if (hipFov < 1.0f) {
+                hipFov = 1.0f;
+            }
+            if (zoomFov < 1.0f) {
+                zoomFov = 1.0f;
+            }
+            cg.zoomSensitivity =
+                (float)(tan(DEG2RAD(zoomFov * 0.5)) / tan(DEG2RAD(hipFov * 0.5)));
+        }
+    }
     return inwater;
 }
 
@@ -672,22 +700,33 @@ static int CG_CalcViewValues(void)
 
     // if we are in a camera view, we take our audio cues directly from the camera
     if (ps->pm_flags & PMF_CAMERA_VIEW) {
-        // Set the aural position to that of the camera
-        VectorCopy(cg.camera_origin, cg.refdef.vieworg);
+        vec3_t fpOrigin, fpAngles;
 
-        // Set the aural axis to the camera's angles
-        VectorCopy(cg.camera_angles, cg.refdefViewAngles);
+        /* Added in Omaha: client-side first-person chase override. */
+        // Changed in MoH Arena: first-person spectate belongs to the modern UI
+        if (CG_ModernUI() && CG_SpectateFP_CalcEye(fpOrigin, fpAngles)) {
+            VectorCopy(fpOrigin, cg.refdef.vieworg);
+            VectorCopy(fpAngles, cg.refdefViewAngles);
+            /* Fixed in Omaha: keep head/sound anchors in sync with FP eye (was chase height). */
+            VectorCopy(cg.refdef.vieworg, cg.playerHeadPos);
+        } else {
+            // Set the aural position to that of the camera
+            VectorCopy(cg.camera_origin, cg.refdef.vieworg);
 
-        if (cg_protocol >= PROTOCOL_MOHTA_MIN && (ps->pm_flags & PMF_DAMAGE_ANGLES)) {
-            // Handle camera shake
-            VectorSubtract(cg.refdefViewAngles, cg.predicted_player_state.damage_angles, cg.refdefViewAngles);
-        }
+            // Set the aural axis to the camera's angles
+            VectorCopy(cg.camera_angles, cg.refdefViewAngles);
 
-        if (ps->camera_posofs[0] || ps->camera_posofs[1] || ps->camera_posofs[2]) {
-            vec3_t vAxis[3], vOrg;
-            AnglesToAxis(cg.refdefViewAngles, vAxis);
-            MatrixTransformVector(ps->camera_posofs, vAxis, vOrg);
-            VectorAdd(cg.refdef.vieworg, vOrg, cg.refdef.vieworg);
+            if (cg_protocol >= PROTOCOL_MOHTA_MIN && (ps->pm_flags & PMF_DAMAGE_ANGLES)) {
+                // Handle camera shake
+                VectorSubtract(cg.refdefViewAngles, cg.predicted_player_state.damage_angles, cg.refdefViewAngles);
+            }
+
+            if (ps->camera_posofs[0] || ps->camera_posofs[1] || ps->camera_posofs[2]) {
+                vec3_t vAxis[3], vOrg;
+                AnglesToAxis(cg.refdefViewAngles, vAxis);
+                MatrixTransformVector(ps->camera_posofs, vAxis, vOrg);
+                VectorAdd(cg.refdef.vieworg, vOrg, cg.refdef.vieworg);
+            }
         }
 
         // copy view values
@@ -864,17 +903,43 @@ void CG_DrawActiveFrame(int serverTime, int frameTime, stereoFrame_t stereoView,
         // no entities should be marked as interpolating
     }
 
-    //
-    // Added in OPM
-    //  Clamp the fov to avoid artifacts
-    if (cg_fov->value < 65) {
-        cgi.Cvar_Set("cg_fov", "65");
-    } else if (cg_fov->value > 120) {
-        cgi.Cvar_Set("cg_fov", "120");
+    // Changed in MoH Arena: the modern UI has its own limits, for the size of the view;
+    //  cg_fov is written only when its value has to change
+    if (CG_ModernUI()) {
+        char fovText[MOHARENA_FOV_TEXT_MAX];
+        int  fovWidth;
+        int  fovHeight;
+
+        fovWidth  = cg.refdef.width;
+        fovHeight = cg.refdef.height;
+        if (!fovWidth || !fovHeight) {
+            // no view was built yet
+            fovWidth  = cgs.glconfig.vidWidth;
+            fovHeight = cgs.glconfig.vidHeight;
+        }
+
+        if (MoHArena_ClampFov(cg_fov->string, fovWidth, fovHeight, fovText, sizeof(fovText))) {
+            cgi.Cvar_Set("cg_fov", fovText);
+        }
+    } else {
+        //
+        // Added in OPM
+        //  Clamp the fov to avoid artifacts
+        if (cg_fov->value < 65) {
+            cgi.Cvar_Set("cg_fov", "65");
+        } else if (cg_fov->value > 120) {
+            cgi.Cvar_Set("cg_fov", "120");
+        }
     }
 
     // update cg.predicted_player_state
     CG_PredictPlayerState();
+
+    /* Added in Omaha: rebuild FP spectate synthetic state before view/camera. */
+    // Added in MoH Arena: first-person spectate belongs to the modern UI
+    if (CG_ModernUI()) {
+        CG_SpectateFP_Update();
+    }
 
     // build cg.refdef
     CG_CalcViewValues();

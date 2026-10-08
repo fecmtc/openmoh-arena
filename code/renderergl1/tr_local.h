@@ -38,7 +38,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 QGL_1_1_PROCS;
 QGL_1_1_FIXED_FUNCTION_PROCS;
+// Added in MoH Arena: glIsEnabled, loaded only for the modern UI.
+QGL_1_1_MODERN_UI_PROCS;
+QGL_1_2_PROCS;
 QGL_1_3_PROCS;
+QGL_1_5_PROCS; /* Added in Omaha: Phase 3 — UI VBO BindBuffer/BufferData */
 QGL_DESKTOP_1_1_PROCS;
 QGL_DESKTOP_1_1_FIXED_FUNCTION_PROCS;
 QGL_3_0_PROCS;
@@ -1251,6 +1255,13 @@ typedef struct {
 	long unsigned int glStateBits;
 	long unsigned int externalSetState;
 	vec4_t fFogColor;
+	/* Added in Omaha: tracked state so UI paths never call glGet/glIsEnabled. */
+	qboolean	scissorEnabled;
+	int			scissorBox[4];      /* x, y, w, h as last passed to glScissor */
+	qboolean	multisampleEnabled; /* GL_MULTISAMPLE enable bit */
+	GLuint		fboDraw;            /* current GL_DRAW_FRAMEBUFFER binding (0 = window) */
+	GLuint		fboRead;            /* current GL_READ_FRAMEBUFFER binding */
+	qboolean	fboKnown;           /* qfalse forces the next bind through */
 } glstate_t;
 
 
@@ -1423,6 +1434,13 @@ extern float     displayAspect;
 extern qboolean  haveClampToEdge;
 
 extern glstate_t	glState;		// outside of TR since it shouldn't be cleared during ref re-init
+/* Added in Omaha: Phase 3 debug — tag GL_Scissor issuer (1 layer, 2 clip, 3 stencil, 4 set2d). */
+extern int re_uiScissorSite;
+#define RE_UI_SCISSOR_OTHER   0
+#define RE_UI_SCISSOR_LAYER   1
+#define RE_UI_SCISSOR_CLIP    2
+#define RE_UI_SCISSOR_STENCIL 3
+#define RE_UI_SCISSOR_SET2D   4
 extern int r_sequencenumber;
 
 
@@ -1702,6 +1720,12 @@ void	GL_SelectTexture( int unit );
 void	GL_TextureMode( const char *string );
 void	GL_CheckErrors( void );
 void	GL_State( unsigned long stateVector );
+/* Added in Omaha: tracked scissor / MSAA / FBO wrappers (Phase 1). */
+void	GL_Scissor( int x, int y, int w, int h );
+void	GL_ScissorEnable( qboolean enable );
+void	GL_MultisampleEnable( qboolean enable );
+void	GL_BindFramebuffer( GLenum target, GLuint fbo );
+void	GL_InvalidateFramebufferBinding( void );
 void	GL_TexEnv( int env );
 void	GL_Cull( int cullType );
 
@@ -1764,6 +1788,8 @@ void Draw_TrianglePic(const vec2_t vPoints[3], const vec2_t vTexCoords[3], qhand
 void DrawBox(float x, float y, float w, float h);
 void AddBox(float x, float y, float w, float h);
 void Set2DWindow(int x, int y, int w, int h, float left, float right, float bottom, float top, float n, float f);
+/* Added in Omaha: Phase 1 — invalidate Set2DWindow dedup after FBO/viewport changes. */
+void RE_InvalidateSet2DWindow(void);
 
 // Added in OPM
 void Set2DInitialShaderTime(float startTime);
@@ -1787,6 +1813,7 @@ void        R_ClearWorld(void);
 qboolean	R_GetEntityToken( char *buffer, int size );
 
 model_t		*R_AllocModel( void );
+void		R_FreeModel( model_t *mod );
 
 void    	R_Init( void );
 
@@ -1807,6 +1834,88 @@ image_t* R_CreateImageOld(
     int glWrapClampModeX,
     int glWrapClampModeY
 );
+
+qhandle_t	RE_CreateUIAtlas(const char *name, const byte *rgba, int width, int height);
+qboolean	RE_UpdateUIAtlas(qhandle_t hShader, const byte *rgba, int width, int height);
+qboolean	RE_UiStencilAvailable(void);
+void		RE_BeginUiStencilMask(int x, int y, int width, int height);
+void		RE_BeginUiStencilDraw(void);
+void		RE_EndUiStencil(void);
+/* Re-apply colorMask/stencil after IssuePending during mask-write phase. */
+void		RE_UiStencilReassertMaskWrite(void);
+/* Added in Omaha: Phase 2 — skip dirty-rect accum during stencil mask-write. */
+qboolean	RE_UiStencilIsMaskWriting(void);
+void		RE_DrawUiStencilMaskTris(const float *xy, int strideBytes, int nv, const unsigned short *idx, int ni);
+qboolean	RE_UI2DBatchSupported(void);
+qboolean	RE_UI2DCanBatchShader(qhandle_t hShader);
+void		RE_DrawUI2D(const ui2dVert_t *verts, int numVerts, const unsigned short *indexes, int numIndexes, qhandle_t hShader);
+void		RE_UI2DBatchBegin(void);
+void		RE_UI2DBatchEnd(void);
+qboolean	RE_UI2DTargetAvailable(void);
+qboolean	RE_BeginUI2DTarget(void);
+void		RE_EndUI2DTarget(void);
+/* Added in Omaha: Phase 4.6 — retained UI target (0 fail, 1 cleared, 2 kept). */
+int			RE_BeginUI2DTargetKeep(int keep);
+void		RE_UI2DClearRectFb(int x, int y, int w, int h);
+qboolean	RE_UI2DTargetRetained(void);
+qboolean	RE_UI2DTargetIsActive(void);
+void		RE_UI2DRestoreFboBlend(void); /* Added in Omaha: restore BlendFuncSeparate for UI FBO */
+qboolean	RE_UI2DTargetHasStencil(void);
+int		RE_UI2DTargetSamples(void);
+void		RE_UI2DTargetRebind(void);
+/* Added in Omaha: Phase 2 — dirty-rect resolve helpers. */
+void		RE_UI2D_AccumRectFb(int x, int y, int w, int h);
+void		RE_UI2D_AccumRectDraw(float x0, float y0, float x1, float y1);
+void		RE_UI2D_MarkFullResolve(void);
+void		RE_UI2D_DrawToWindow(float dx, float dy, float *wx, float *wy);
+void		RE_UI2D_NoteWin2D(int x, int y, int w, int h, float left, float right, float bottom, float top);
+/* Added in Omaha debug: glFinish for UI GPU attribution. */
+void		RE_UI2D_FboShutdown(void);
+
+/* Added in Omaha: per-frame UI GL event counters + optional GPU timers (ui_perf_hud). */
+extern uiGlStats_t tr_uiStats;
+extern cvar_t     *r_uiPerfGpu;
+extern cvar_t     *r_uiSyncQueries; /* Added in Omaha: Phase 1 A/B for glIsEnabled/glGet */
+extern cvar_t     *r_uiClearMode;   /* Added in Omaha: Phase 2 */
+extern cvar_t     *r_uiResolveRects; /* Added in Omaha: Phase 2 */
+extern cvar_t     *r_uiVbo;          /* Added in Omaha: Phase 3 — UI batch VBO streaming */
+void		RE_UI2D_VboShutdown(void); /* Added in Omaha: Phase 3 */
+void		RE_UI2D_UnbindBuffers(void); /* Added in Omaha: Phase 4 — client-array paths call before glVertexPointer */
+void		RE_UI2D_ReleaseBuffersForClientArrays(void); /* Fixed in Omaha: no-op unless the UI batch holds VBO/IBO */
+void		RE_UiStatsFrameBegin(void);
+void		RE_UiStatsGet(uiGlStats_t *out);
+void		RE_UiGpuBeginUi(void);
+void		RE_UiGpuEndUi(void);
+void		RE_UiGpuBeginResolve(void);
+void		RE_UiGpuEndResolve(void);
+void		RE_UiGpuBeginLayer(void);
+void		RE_UiGpuEndLayer(void);
+
+/* Added in Omaha: soft mask-image layer RT (UI FBO only). */
+qboolean	RE_UiLayerAvailable(void);
+qboolean	RE_UiLayerIsActive(void);
+void		RE_UiLayerRebind(void);
+void		RE_UiLayerShutdown(void);
+qboolean	RE_BeginUiLayer(int fbX, int fbY, int fbW, int fbH, float uiX, float uiY, float uiW, float uiH);
+void		RE_UiLayerApplyMask(qhandle_t hShader, float x, float y, float w, float h, float s1, float t1, float s2, float t2);
+void		RE_EndUiLayer(void);
+
+/* Added in Omaha: retained chrome cache RT (separate from soft-mask layer). */
+qboolean	RE_UiChromeCacheAvailable(void);
+qboolean	RE_UiChromeCacheIsActive(void);
+void		RE_UiChromeCacheRebind(void);
+void		RE_UiChromeCacheShutdown(void);
+qboolean	RE_BeginUiChromeCacheCapture(float uiX, float uiY, float uiW, float uiH);
+void		RE_EndUiChromeCacheCapture(void);
+void		RE_BlitUiChromeCache(void);
+void		RE_InvalidateUiChromeCache(void);
+
+void		RE_ClearWorld(void);
+void		RE_LoadMenuWorld(const char *name);
+qboolean	RE_LoadMenuWorldStaged(const char *name);
+void		RE_CommitMenuWorld(void);
+void		RE_CancelMenuWorldStaging(void);
+qboolean	RE_HasActiveWorld(void);
 
 qboolean R_ImageExists(const char* name);
 int R_CountTextureMemory();
@@ -1844,6 +1953,8 @@ qhandle_t RE_RegisterShaderFromImage(const char *name, int lightmapIndex, image_
 shader_t* R_FindShader(const char* name, int lightmapIndex, qboolean mipRawImage, qboolean picmip, qboolean wrapx, qboolean wrapy);
 shader_t	*R_GetShaderByHandle( qhandle_t hShader );
 shader_t	*R_GetShaderByState( int index, long *cycleTime );
+/* Fixed in Omaha: menu world reload frees/recreates *lightmap images; refresh cached shaders. */
+void		R_RemountLightmapShaderImages( void );
 void R_StartupShaders();
 void R_ShutdownShaders();
 void R_SetupShaders();
@@ -2492,6 +2603,7 @@ extern	volatile qboolean	renderThreadActive;
 
 
 void *R_GetCommandBuffer( int bytes );
+void R_IssuePendingRenderCommands( void );
 void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 void R_AddSpriteSurfCmd( drawSurf_t* drawSurfs, int numDrawSurfs );
 void RB_ExecuteRenderCommands( const void *data );

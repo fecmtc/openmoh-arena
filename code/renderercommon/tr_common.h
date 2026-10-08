@@ -85,6 +85,18 @@ typedef struct image_s {
 #define LIGHTMAP_NONE       -1
 
 extern	refimport_t		ri;
+
+// Added in MoH Arena: qtrue when the game was started with the modern UI (ui_legacy 0).
+//  The switch is only read at startup, so the answer is looked up once.
+static ID_INLINE qboolean R_ModernUI( void )
+{
+	static int modern = -1;
+
+	if ( modern < 0 ) {
+		modern = ri.Cvar_Get( "ui_legacy", "1", CVAR_INIT )->integer ? 0 : 1;
+	}
+	return modern ? qtrue : qfalse;
+}
 extern glconfig_t	glConfig;		// outside of TR since it shouldn't be cleared during ref re-init
 
 // These variables should live inside glConfig but can't because of
@@ -161,6 +173,7 @@ void R_LoadBMP( const char *name, byte **pic, int *width, int *height );
 void R_LoadJPG( const char *name, byte **pic, int *width, int *height );
 void R_LoadPCX( const char *name, byte **pic, int *width, int *height );
 void R_LoadPNG( const char *name, byte **pic, int *width, int *height );
+void RE_SavePNG( const char *filename, int width, int height, const byte *rgba );
 void R_LoadPVR( const char *name, byte **pic, int *width, int *height );
 void R_LoadTGA( const char *name, byte **pic, int *width, int *height );
 

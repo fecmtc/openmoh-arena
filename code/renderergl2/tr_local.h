@@ -42,6 +42,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define GLE(ret, name, ...) extern name##proc * qgl##name;
 #endif
 QGL_1_1_PROCS;
+// Added in MoH Arena: glIsEnabled, loaded only for the modern UI.
+QGL_1_1_MODERN_UI_PROCS;
 QGL_DESKTOP_1_1_PROCS;
 QGL_1_3_PROCS;
 QGL_1_5_PROCS;
@@ -2656,6 +2658,11 @@ shader_t *R_FindShaderByName( const char *name );
 void		R_InitShaders( void );
 void		R_ShaderList_f( void );
 void    R_RemapShader(const char *oldShader, const char *newShader, const char *timeOffset);
+
+/* Added in Omaha: dynamic UI atlas (fonts / gradient fills). */
+qhandle_t RE_CreateUIAtlas(const char *name, const byte *rgba, int width, int height);
+qboolean  RE_UpdateUIAtlas(qhandle_t hShader, const byte *rgba, int width, int height);
+
 
 //
 // OPENMOHAA-specific stuff

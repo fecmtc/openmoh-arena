@@ -63,6 +63,7 @@ void (APIENTRYP qglMultiTexCoord2fARB) (GLenum target, GLfloat s, GLfloat t);
 
 void (APIENTRYP qglLockArraysEXT) (GLint first, GLsizei count);
 void (APIENTRYP qglUnlockArraysEXT) (void);
+void (APIENTRYP qglBlendFuncSeparate) (GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha);
 
 #define GLE(ret, name, ...) name##proc * qgl##name = NULL;
 QGL_1_1_PROCS;
@@ -71,15 +72,21 @@ QGL_DESKTOP_1_1_PROCS;
 QGL_DESKTOP_1_1_FIXED_FUNCTION_PROCS;
 QGL_ES_1_1_PROCS;
 QGL_ES_1_1_FIXED_FUNCTION_PROCS;
+// Added in MoH Arena: glIsEnabled, loaded only for the modern UI.
+QGL_1_1_MODERN_UI_PROCS;
+QGL_1_2_PROCS;
 QGL_1_3_PROCS;
 QGL_1_5_PROCS;
 QGL_2_0_PROCS;
 QGL_3_0_PROCS;
 QGL_ARB_occlusion_query_PROCS;
+QGL_ARB_timer_query_PROCS;
 QGL_ARB_framebuffer_object_PROCS;
 QGL_ARB_vertex_array_object_PROCS;
 QGL_EXT_direct_state_access_PROCS;
 #undef GLE
+
+static void GLimp_ClearProcAddresses( void );
 
 /*
 ===============
@@ -89,6 +96,22 @@ GLimp_Shutdown
 void GLimp_Shutdown( void )
 {
 	ri.IN_Shutdown();
+
+	// Added in MoH Arena: the context and the window are only cleaned up here with the modern UI.
+	if ( R_ModernUI() ) {
+		if ( SDL_glContext != NULL ) {
+			GLimp_ClearProcAddresses();
+			SDL_GL_DeleteContext( SDL_glContext );
+			SDL_glContext = NULL;
+		}
+
+		/*
+		 * Do not SDL_DestroyWindow here — SDL_QuitSubSystem(VIDEO) tears the window
+		 * down. Explicit destroy + QuitSubSystem left a live window with no GL
+		 * context (black screen) on some Linux/Wayland setups after vid_restart.
+		 */
+		SDL_window = NULL;
+	}
 
 	SDL_QuitSubSystem( SDL_INIT_VIDEO );
 }
@@ -315,21 +338,86 @@ static qboolean GLimp_GetProcAddresses( qboolean fixedFunction ) {
 		} else {
 			Com_Error( ERR_FATAL, "Unsupported OpenGL Version (%s), OpenGL 1.1 is required", version );
 		}
+		// Added in MoH Arena: the driver is only asked for glIsEnabled and glDrawRangeElements with the modern UI.
+		if ( R_ModernUI() ) {
+			QGL_1_1_MODERN_UI_PROCS;
+			/* Added in Omaha: DrawRangeElements (GL 1.2) for UI batch draws. */
+			if ( QGL_VERSION_ATLEAST( 1, 2 ) ) {
+				QGL_1_2_PROCS;
+			}
+		}
 		// Added in OPM
 		//  Add compression-related GL functions for the renderer
 		if ( QGL_VERSION_ATLEAST( 1, 3 ) ) {
 			QGL_1_3_PROCS;
 		}
+
+		// Added in MoH Arena: the optional functions below are only looked up with the modern UI.
+		if ( R_ModernUI() ) {
+			/* Added in Omaha: optional UI FBO / separate alpha blend procs (non-fatal). */
+#undef GLE
+#ifdef __SDL_NOGETPROCADDR__
+#define GLE_OPT( ret, name, ... ) qgl##name = gl#name;
+#else
+#define GLE_OPT( ret, name, ... ) qgl##name = (name##proc *) SDL_GL_GetProcAddress("gl" #name);
+#endif
+			if ( QGL_VERSION_ATLEAST( 1, 4 ) ) {
+#ifdef __SDL_NOGETPROCADDR__
+				qglBlendFuncSeparate = glBlendFuncSeparate;
+#else
+				qglBlendFuncSeparate = (void (APIENTRY *)(GLenum, GLenum, GLenum, GLenum))
+					SDL_GL_GetProcAddress("glBlendFuncSeparate");
+#endif
+			}
+			if ( QGL_VERSION_ATLEAST( 3, 0 ) ) {
+#define GLE GLE_OPT
+				QGL_ARB_framebuffer_object_PROCS;
+#undef GLE
+			}
+			/* Added in Omaha: Phase 3 — UI VBO streaming (GL 1.5 / ARB_vertex_buffer_object). */
+			if ( QGL_VERSION_ATLEAST( 1, 5 ) || SDL_GL_ExtensionSupported( "GL_ARB_vertex_buffer_object" ) ) {
+#define GLE GLE_OPT
+				QGL_1_5_PROCS;
+#undef GLE
+			}
+			/* Added in Omaha: optional timer queries for ui_perf_gpu (non-fatal). */
+			if ( QGL_VERSION_ATLEAST( 3, 3 ) || SDL_GL_ExtensionSupported( "GL_ARB_timer_query" ) ) {
+#define GLE GLE_OPT
+				QGL_ARB_occlusion_query_PROCS;
+				QGL_ARB_timer_query_PROCS;
+#undef GLE
+			}
+		}
+#undef GLE_OPT
+#ifdef __SDL_NOGETPROCADDR__
+#define GLE( ret, name, ... ) qgl##name = gl#name;
+#else
+#define GLE( ret, name, ... ) qgl##name = (name##proc *) SDL_GL_GetProcAddress("gl" #name); \
+	if ( qgl##name == NULL ) { \
+		ri.Printf( PRINT_ALL, "ERROR: Missing OpenGL function %s\n", "gl" #name ); \
+		success = qfalse; \
+	}
+#endif
 	} else {
 		if ( QGL_VERSION_ATLEAST( 2, 0 ) ) {
 			QGL_1_1_PROCS;
 			QGL_DESKTOP_1_1_PROCS;
+			// Added in MoH Arena: the driver is only asked for glIsEnabled and glDrawRangeElements with the modern UI.
+			if ( R_ModernUI() ) {
+				QGL_1_1_MODERN_UI_PROCS;
+				QGL_1_2_PROCS;
+			}
 			QGL_1_3_PROCS;
 			QGL_1_5_PROCS;
 			QGL_2_0_PROCS;
 		} else if ( QGLES_VERSION_ATLEAST( 2, 0 ) ) {
 			QGL_1_1_PROCS;
 			QGL_ES_1_1_PROCS;
+			// Added in MoH Arena: the driver is only asked for glIsEnabled and glDrawRangeElements with the modern UI.
+			if ( R_ModernUI() ) {
+				QGL_1_1_MODERN_UI_PROCS;
+				QGL_1_2_PROCS;
+			}
 			QGL_1_3_PROCS;
 			QGL_1_5_PROCS;
 			QGL_2_0_PROCS;
@@ -373,11 +461,15 @@ static void GLimp_ClearProcAddresses( void ) {
 	QGL_DESKTOP_1_1_FIXED_FUNCTION_PROCS;
 	QGL_ES_1_1_PROCS;
 	QGL_ES_1_1_FIXED_FUNCTION_PROCS;
+	// Added in MoH Arena: glIsEnabled, loaded only for the modern UI.
+	QGL_1_1_MODERN_UI_PROCS;
+	QGL_1_2_PROCS;
 	QGL_1_3_PROCS;
 	QGL_1_5_PROCS;
 	QGL_2_0_PROCS;
 	QGL_3_0_PROCS;
 	QGL_ARB_occlusion_query_PROCS;
+	QGL_ARB_timer_query_PROCS;
 	QGL_ARB_framebuffer_object_PROCS;
 	QGL_ARB_vertex_array_object_PROCS;
 	QGL_EXT_direct_state_access_PROCS;
@@ -388,8 +480,120 @@ static void GLimp_ClearProcAddresses( void ) {
 
 	qglLockArraysEXT = NULL;
 	qglUnlockArraysEXT = NULL;
+	qglBlendFuncSeparate = NULL;
 
 #undef GLE
+}
+
+/*
+===============
+GLimp_SyncVidSizeFromDrawable
+
+Added in Omaha: glConfig must match the real GL drawable so RenderScene Y-flip
+and modern UI (GetDrawableSize) agree after soft/failed exclusive fullscreen.
+===============
+*/
+static void GLimp_SyncVidSizeFromDrawable( void )
+{
+	int w = 0;
+	int h = 0;
+
+	if ( !SDL_window ) {
+		return;
+	}
+
+	SDL_GL_GetDrawableSize( SDL_window, &w, &h );
+	if ( w <= 0 || h <= 0 ) {
+		SDL_GetWindowSize( SDL_window, &w, &h );
+	}
+	if ( w > 0 && h > 0 ) {
+		glConfig.vidWidth = w;
+		glConfig.vidHeight = h;
+		glConfig.windowAspect = (float)w / (float)h;
+	}
+}
+
+/*
+===============
+GLimp_VidSizeMatchesRequest
+
+True when drawable matches requested mode (exact, ~2%, or uniform HiDPI scale).
+===============
+*/
+static qboolean GLimp_VidSizeMatchesRequest( int reqW, int reqH )
+{
+	int dw = 0;
+	int dh = 0;
+	int tolW;
+	int tolH;
+	int scale;
+
+	if ( !SDL_window || reqW <= 0 || reqH <= 0 ) {
+		return qfalse;
+	}
+
+	SDL_GL_GetDrawableSize( SDL_window, &dw, &dh );
+	if ( dw <= 0 || dh <= 0 ) {
+		SDL_GetWindowSize( SDL_window, &dw, &dh );
+	}
+	if ( dw <= 0 || dh <= 0 ) {
+		return qfalse;
+	}
+
+	tolW = reqW / 50;
+	tolH = reqH / 50;
+	if ( tolW < 2 ) {
+		tolW = 2;
+	}
+	if ( tolH < 2 ) {
+		tolH = 2;
+	}
+	if ( abs( dw - reqW ) <= tolW && abs( dh - reqH ) <= tolH ) {
+		return qtrue;
+	}
+
+	if ( ( dw % reqW ) == 0 && ( dh % reqH ) == 0 ) {
+		scale = dw / reqW;
+		if ( scale >= 1 && scale <= 4 && ( dh / reqH ) == scale ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
+/*
+===============
+GLimp_WindowFillsCurrentDisplay
+
+Exclusive fullscreen that left a small window on a large desktop fails this.
+===============
+*/
+static qboolean GLimp_WindowFillsCurrentDisplay( void )
+{
+	int            ww = 0;
+	int            wh = 0;
+	int            display;
+	SDL_DisplayMode cur;
+
+	if ( !SDL_window ) {
+		return qfalse;
+	}
+
+	SDL_GetWindowSize( SDL_window, &ww, &wh );
+	display = SDL_GetWindowDisplayIndex( SDL_window );
+	if ( display < 0 ) {
+		display = 0;
+	}
+	if ( SDL_GetCurrentDisplayMode( display, &cur ) != 0 || cur.w <= 0 || cur.h <= 0 ) {
+		return qtrue;
+	}
+	if ( ww <= 0 || wh <= 0 ) {
+		return qfalse;
+	}
+	if ( ww + 2 < ( cur.w * 9 ) / 10 || wh + 2 < ( cur.h * 9 ) / 10 ) {
+		return qfalse;
+	}
+	return qtrue;
 }
 
 /*
@@ -415,6 +619,11 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 	SDL_DisplayMode desktopMode;
 	int display = 0;
 	int x = SDL_WINDOWPOS_UNDEFINED, y = SDL_WINDOWPOS_UNDEFINED;
+	int requestedW = 0;
+	int requestedH = 0;
+	qboolean desktopFullscreen = qfalse; /* Added in Omaha: borderless → FULLSCREEN_DESKTOP */
+	qboolean exclusiveFullscreen = qfalse;
+	qboolean displayModeFailed = qfalse;
 
 	ri.Printf( PRINT_ALL, "Initializing OpenGL display\n");
 
@@ -488,6 +697,27 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 	}
 	ri.Printf( PRINT_ALL, " %d %d\n", glConfig.vidWidth, glConfig.vidHeight);
 
+	requestedW = glConfig.vidWidth;
+	requestedH = glConfig.vidHeight;
+
+	// Changed in MoH Arena: only the modern UI turns borderless fullscreen into desktop fullscreen.
+	//  With the original UI every fullscreen request is the exclusive kind, at the size of the game mode.
+	if ( R_ModernUI() ) {
+		/* Added in Omaha: borderless fullscreen uses desktop size, not the game mode. */
+		desktopFullscreen = ( fullscreen && noborder ) ? qtrue : qfalse;
+		exclusiveFullscreen = ( fullscreen && !noborder ) ? qtrue : qfalse;
+		if ( desktopFullscreen && desktopMode.w > 0 && desktopMode.h > 0 ) {
+			glConfig.vidWidth = desktopMode.w;
+			glConfig.vidHeight = desktopMode.h;
+			glConfig.windowAspect = (float)glConfig.vidWidth / (float)glConfig.vidHeight;
+			ri.Printf( PRINT_ALL, "...borderless desktop fullscreen %d %d\n",
+					glConfig.vidWidth, glConfig.vidHeight );
+		}
+	} else {
+		desktopFullscreen = qfalse;
+		exclusiveFullscreen = fullscreen ? qtrue : qfalse;
+	}
+
 	// Center window
 	if( r_centerWindow->integer && !fullscreen )
 	{
@@ -511,7 +741,13 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 		SDL_window = NULL;
 	}
 
-	if( fullscreen )
+	if( desktopFullscreen )
+	{
+		/* Added in Omaha: UI Borderless → desktop fullscreen (not exclusive mode). */
+		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+		glConfig.isFullscreen = qtrue;
+	}
+	else if( exclusiveFullscreen )
 	{
 		flags |= SDL_WINDOW_FULLSCREEN;
 		glConfig.isFullscreen = qtrue;
@@ -774,7 +1010,7 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 			continue;
 		}
 
-		if( fullscreen )
+		if( exclusiveFullscreen )
 		{
 			SDL_DisplayMode desiredMode;
 
@@ -785,15 +1021,22 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 				default: ri.Printf( PRINT_DEVELOPER, "testColorBits is %d, can't fullscreen\n", testColorBits ); continue;
 			}
 
-			desiredMode.w = glConfig.vidWidth;
-			desiredMode.h = glConfig.vidHeight;
+			desiredMode.w = requestedW;
+			desiredMode.h = requestedH;
 			desiredMode.refresh_rate = glConfig.displayFrequency = ri.Cvar_VariableIntegerValue( "r_displayRefresh" );
 			desiredMode.driverdata = NULL;
 
 			if( SDL_SetWindowDisplayMode( SDL_window, &desiredMode ) < 0 )
 			{
-				ri.Printf( PRINT_DEVELOPER, "SDL_SetWindowDisplayMode failed: %s\n", SDL_GetError( ) );
-				continue;
+				// Changed in MoH Arena: only the modern UI keeps the window and falls back later.
+				if ( R_ModernUI() ) {
+					ri.Printf( PRINT_ALL, "SDL_SetWindowDisplayMode failed: %s\n", SDL_GetError( ) );
+					/* Added in Omaha: keep the window; fall back to desktop fullscreen after show. */
+					displayModeFailed = qtrue;
+				} else {
+					ri.Printf( PRINT_DEVELOPER, "SDL_SetWindowDisplayMode failed: %s\n", SDL_GetError( ) );
+					continue;
+				}
 			}
 		}
 
@@ -830,6 +1073,31 @@ static int GLimp_SetMode(int mode, qboolean fullscreen, qboolean noborder, qbool
 	}
 
 	SDL_ShowWindow( SDL_window );
+
+	// Added in MoH Arena: the fallback and the size taken from the drawable are for the modern UI only.
+	if ( R_ModernUI() ) {
+		/*
+		 * Added in Omaha: exclusive mode often fails softly on Wayland/compositors —
+		 * drawable stays desktop-sized or the window stays a small rect. Fall back
+		 * to desktop fullscreen and always sync glConfig from the real drawable.
+		 */
+		if ( exclusiveFullscreen &&
+			( displayModeFailed ||
+			  !GLimp_VidSizeMatchesRequest( requestedW, requestedH ) ||
+			  !GLimp_WindowFillsCurrentDisplay() ) )
+		{
+			ri.Printf( PRINT_ALL,
+				"Exclusive %dx%d fullscreen unavailable; falling back to desktop fullscreen\n",
+				requestedW, requestedH );
+			if ( SDL_SetWindowFullscreen( SDL_window, SDL_WINDOW_FULLSCREEN_DESKTOP ) < 0 ) {
+				ri.Printf( PRINT_ALL, "SDL_SetWindowFullscreen(DESKTOP) failed: %s\n", SDL_GetError() );
+			}
+			glConfig.isFullscreen = qtrue;
+		}
+
+		GLimp_SyncVidSizeFromDrawable();
+		ri.Printf( PRINT_ALL, "...GL drawable %d %d (glConfig)\n", glConfig.vidWidth, glConfig.vidHeight );
+	}
 
 	GLimp_DetectAvailableModes();
 
@@ -1198,6 +1466,9 @@ void GLimp_EndFrame( void )
 	if( r_fullscreen->modified )
 	{
 		int         fullscreen;
+		int         prevW;
+		int         prevH;
+		Uint32      fsFlags;
 		qboolean    needToToggle;
 		qboolean    sdlToggled = qfalse;
 
@@ -1216,11 +1487,44 @@ void GLimp_EndFrame( void )
 
 		if( needToToggle )
 		{
-			sdlToggled = SDL_SetWindowFullscreen( SDL_window, r_fullscreen->integer ) >= 0;
+			// Changed in MoH Arena: only the modern UI picks desktop fullscreen here and takes the new size from the drawable.
+			if ( R_ModernUI() ) {
+				prevW = glConfig.vidWidth;
+				prevH = glConfig.vidHeight;
 
-			// SDL_WM_ToggleFullScreen didn't work, so do it the slow way
-			if( !sdlToggled )
-				ri.Cmd_ExecuteText(EXEC_APPEND, "vid_restart\n");
+				/* Added in Omaha: borderless uses desktop fullscreen; exclusive otherwise. */
+				if ( !r_fullscreen->integer ) {
+					fsFlags = 0;
+				} else if ( ri.Cvar_VariableIntegerValue( "r_noborder" ) ) {
+					fsFlags = SDL_WINDOW_FULLSCREEN_DESKTOP;
+				} else {
+					fsFlags = SDL_WINDOW_FULLSCREEN;
+				}
+
+				sdlToggled = SDL_SetWindowFullscreen( SDL_window, fsFlags ) >= 0;
+
+				// SDL_WM_ToggleFullScreen didn't work, so do it the slow way
+				if( !sdlToggled )
+				{
+					ri.Cmd_ExecuteText(EXEC_APPEND, "vid_restart\n");
+				}
+				else
+				{
+					GLimp_SyncVidSizeFromDrawable();
+					if ( glConfig.vidWidth != prevW || glConfig.vidHeight != prevH ) {
+						ri.Printf( PRINT_ALL,
+							"Fullscreen toggle changed drawable %dx%d -> %dx%d; vid_restart\n",
+							prevW, prevH, glConfig.vidWidth, glConfig.vidHeight );
+						ri.Cmd_ExecuteText( EXEC_APPEND, "vid_restart\n" );
+					}
+				}
+			} else {
+				sdlToggled = SDL_SetWindowFullscreen( SDL_window, r_fullscreen->integer ) >= 0;
+
+				// SDL_WM_ToggleFullScreen didn't work, so do it the slow way
+				if( !sdlToggled )
+					ri.Cmd_ExecuteText(EXEC_APPEND, "vid_restart\n");
+			}
 
 			ri.IN_Restart( );
 		}

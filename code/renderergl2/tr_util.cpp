@@ -344,6 +344,14 @@ int RE_GetShaderWidth(qhandle_t hShader)
         shader = tr.defaultShader;
     }
 
+    // Changed in MoH Arena: only the modern UI gets the size of the source image.
+    //  The original UI gets the size the image was uploaded with.
+    if (R_ModernUI()) {
+        /* Changed in Omaha: return source size (not POT upload size) so UI contain/cover
+         * and tile math match the authored image aspect (same as RE_StretchPic defaults). */
+        return shader->stages[0]->bundle[0].image[0]->width;
+    }
+
     return shader->stages[0]->bundle[0].image[0]->uploadWidth;
 }
 
@@ -360,6 +368,11 @@ int RE_GetShaderHeight(qhandle_t hShader)
         shader = R_GetShaderByHandle(hShader);
     } else {
         shader = tr.defaultShader;
+    }
+
+    // Changed in MoH Arena: only the modern UI gets the size of the source image.
+    if (R_ModernUI()) {
+        return shader->stages[0]->bundle[0].image[0]->height;
     }
 
     return shader->stages[0]->bundle[0].image[0]->uploadHeight;

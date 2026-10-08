@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+// Added in MoH Arena: the limits of r_picmip and cg_shadows with the modern UI.
+#include "../qcommon/moharena_limits.h"
 
 glconfig_t	glConfig;
 qboolean	textureFilterAnisotropic = qfalse;
@@ -262,6 +264,13 @@ cvar_t* r_loadftx;
 cvar_t* r_showSkeleton;
 
 cvar_t* r_ext_multisample;
+cvar_t* r_uiFramebuffer;
+cvar_t* r_uiMultisample;
+cvar_t* r_uiSyncQueries; /* Added in Omaha: Phase 1 A/B for glIsEnabled/glGet */
+cvar_t* r_uiClearMode;   /* Added in Omaha: Phase 2 — 0 color-only UI FBO clear, 1 color+depth+stencil */
+cvar_t* r_uiResolveRects; /* Added in Omaha: Phase 2 — 1 region resolve, 0 full, 2 debug outlines */
+cvar_t* r_uiVbo;          /* Added in Omaha: Phase 3 — stream UI batches via VBO */
+/* r_uiPerfGpu is defined in tr_ui_stats.c */
 cvar_t* r_noborder;
 cvar_t* r_ext_texture_filter_anisotropic;
 cvar_t* r_stereoEnabled;
@@ -1074,6 +1083,32 @@ void GL_SetDefaultState( void )
 	qglDisable( GL_CULL_FACE );
 	qglDisable( GL_BLEND );
 
+	// Added in MoH Arena: this state is only tracked, and only set here, with the modern UI.
+	if ( R_ModernUI() ) {
+		/* Added in Omaha: sync tracked scissor / MSAA / FBO with actual GL (vid_restart). */
+		glState.scissorEnabled = qtrue;
+		glState.scissorBox[0] = 0;
+		glState.scissorBox[1] = 0;
+		glState.scissorBox[2] = glConfig.vidWidth;
+		glState.scissorBox[3] = glConfig.vidHeight;
+		qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+#ifdef GL_MULTISAMPLE
+		glState.multisampleEnabled = qtrue;
+		qglEnable( GL_MULTISAMPLE );
+#else
+		glState.multisampleEnabled = qfalse;
+#endif
+		glState.fboDraw = 0;
+		glState.fboRead = 0;
+		glState.fboKnown = qtrue;
+		if ( qglBindFramebuffer ) {
+#ifndef GL_FRAMEBUFFER
+#define GL_FRAMEBUFFER 0x8D40
+#endif
+			qglBindFramebuffer( GL_FRAMEBUFFER, 0 );
+		}
+	}
+
 	qglFogi(GL_FOG_MODE, GL_LINEAR);
 
 	glState.fFogColor[0] = 0.0;
@@ -1339,7 +1374,12 @@ void R_Register( void )
 	
 	r_roundImagesDown = ri.Cvar_Get ("r_roundImagesDown", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_colorMipLevels = ri.Cvar_Get ("r_colorMipLevels", "0", CVAR_LATCH );
-	ri.Cvar_CheckRange( r_picmip, 0, 16, qtrue );
+	// Changed in MoH Arena: with the modern UI r_picmip stops at MOHARENA_PICMIP_MAX.
+	if ( R_ModernUI() ) {
+		ri.Cvar_CheckRange( r_picmip, 0, MOHARENA_PICMIP_MAX, qtrue );
+	} else {
+		ri.Cvar_CheckRange( r_picmip, 0, 16, qtrue );
+	}
 	r_textureDetails = ri.Cvar_Get("r_textureDetails", "1", 33);
 	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_colorbits = ri.Cvar_Get( "r_colorbits", "0", CVAR_ARCHIVE | CVAR_LATCH );
@@ -1380,7 +1420,13 @@ void R_Register( void )
 	// temporary latched variables that can only change over a restart
 	//
 	r_displayRefresh = ri.Cvar_Get( "r_displayRefresh", "0", CVAR_LATCH );
-	ri.Cvar_CheckRange( r_displayRefresh, 0, 200, qtrue );
+	// Changed in MoH Arena: the wider range is only used with the modern UI.
+	if ( R_ModernUI() ) {
+		/* Changed in Omaha: allow modern panel rates (240/360+); was legacy 0–200. */
+		ri.Cvar_CheckRange( r_displayRefresh, 0, 1000, qtrue );
+	} else {
+		ri.Cvar_CheckRange( r_displayRefresh, 0, 200, qtrue );
+	}
 	r_fullbright = ri.Cvar_Get ("r_fullbright", "0", CVAR_LATCH|CVAR_CHEAT );
 	r_mapOverBrightBits = ri.Cvar_Get ("r_mapOverBrightBits", "1", CVAR_LATCH );
 	r_intensity = ri.Cvar_Get ("r_intensity", "1", CVAR_LATCH );
@@ -1510,6 +1556,11 @@ void R_Register( void )
 	r_entlight_cubefraction = ri.Cvar_Get("r_entlight_cubefraction", "0.5", CVAR_ARCHIVE);
 	r_entlight_maxcalc = ri.Cvar_Get("r_entlight_maxcalc", "2", CVAR_ARCHIVE);
 	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	// Added in MoH Arena: with the modern UI cg_shadows stops at MOHARENA_SHADOWS_MAX.
+	//  The original UI sets no range.
+	if ( R_ModernUI() ) {
+		ri.Cvar_CheckRange( r_shadows, 0, MOHARENA_SHADOWS_MAX, qtrue );
+	}
 
 	r_maxpolys = ri.Cvar_Get( "r_maxpolys", va("%d", MAX_POLYS), 0);
 	r_maxpolyverts = ri.Cvar_Get( "r_maxpolyverts", va("%d", MAX_POLYVERTS), 0);
@@ -1559,6 +1610,22 @@ void R_Register( void )
 	r_loadftx = ri.Cvar_Get("r_loadftx", "0", CVAR_LATCH);
 
 	r_ext_multisample = ri.Cvar_Get("r_ext_multisample", "0", CVAR_ARCHIVE | CVAR_LATCH);
+	// Added in MoH Arena: these cvars only exist with the modern UI.
+	//  With the original UI their pointers stay NULL.
+	if ( R_ModernUI() ) {
+		r_uiFramebuffer = ri.Cvar_Get("r_uiFramebuffer", "1", CVAR_ARCHIVE);
+		r_uiMultisample = ri.Cvar_Get("r_uiMultisample", "8", CVAR_ARCHIVE | CVAR_LATCH);
+		/* Added in Omaha: Phase 1 A/B — 1 restores old glIsEnabled/glGetIntegerv UI queries. */
+		r_uiSyncQueries = ri.Cvar_Get("r_uiSyncQueries", "0", CVAR_ARCHIVE);
+		/* Added in Omaha: Phase 2 — UI FBO clear / resolve region controls. */
+		r_uiClearMode = ri.Cvar_Get("r_uiClearMode", "0", CVAR_ARCHIVE);
+		r_uiResolveRects = ri.Cvar_Get("r_uiResolveRects", "1", CVAR_ARCHIVE);
+		/* Added in Omaha: Phase 3 — stream UI batches via VBO. */
+		r_uiVbo = ri.Cvar_Get("r_uiVbo", "1", CVAR_ARCHIVE);
+		/* Added in Omaha: GPU timing reads force a driver sync every 60 frames;
+		 * compare frame us with ui_perf_gpu 0 vs 1 to see the sync penalty itself. */
+		r_uiPerfGpu = ri.Cvar_Get("r_uiPerfGpu", "0", CVAR_TEMP);
+	}
 	r_noborder = ri.Cvar_Get("r_noborder", "0", CVAR_ARCHIVE | CVAR_LATCH);
 	r_ext_texture_filter_anisotropic = ri.Cvar_Get("r_ext_texture_filter_anisotropic",
 		"0", CVAR_ARCHIVE | CVAR_LATCH);
@@ -1740,6 +1807,10 @@ void RE_Shutdown( qboolean destroyWindow ) {
 
 	if ( tr.registered ) {
 		R_IssuePendingRenderCommands();
+		// Added in MoH Arena: the UI render target only exists with the modern UI.
+		if ( R_ModernUI() ) {
+			RE_UI2D_FboShutdown();
+		}
 		R_DeleteTextures();
 	}
 
@@ -1843,6 +1914,14 @@ GetRefAPI
 
 @@@@@@@@@@@@@@@@@@@@@
 */
+static qboolean RE_ExportModelPreviewPNG_stub(const refdef_t *fd, const char *vfsPath)
+{
+	(void)fd;
+	(void)vfsPath;
+	ri.Printf(PRINT_WARNING, "ExportModelPreviewPNG requires renderer_opengl2\n");
+	return qfalse;
+}
+
 #ifdef USE_RENDERER_DLOPEN
 Q_EXPORT refexport_t* QDECL GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 #else
@@ -1972,6 +2051,45 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
     re.FreeRawImage = R_FreeRawImage;
 
 	re.Set2DInitialShaderTime = Set2DInitialShaderTime;
+
+	re.CreateUIAtlas = RE_CreateUIAtlas;
+	re.UpdateUIAtlas = RE_UpdateUIAtlas;
+	re.UiStencilAvailable = RE_UiStencilAvailable;
+	re.BeginUiStencilMask = RE_BeginUiStencilMask;
+	re.BeginUiStencilDraw = RE_BeginUiStencilDraw;
+	re.EndUiStencil = RE_EndUiStencil;
+	re.DrawUiStencilMaskTris = RE_DrawUiStencilMaskTris;
+	re.UI2DBatchSupported = RE_UI2DBatchSupported;
+	re.UI2DCanBatchShader = RE_UI2DCanBatchShader;
+	re.DrawUI2D = RE_DrawUI2D;
+	re.UI2DBatchBegin = RE_UI2DBatchBegin;
+	re.UI2DBatchEnd = RE_UI2DBatchEnd;
+	re.UI2DTargetAvailable = RE_UI2DTargetAvailable;
+	re.BeginUI2DTarget = RE_BeginUI2DTarget;
+	re.EndUI2DTarget = RE_EndUI2DTarget;
+	re.UI2DTargetIsActive = RE_UI2DTargetIsActive;
+	re.UI2DTargetSamples = RE_UI2DTargetSamples;
+	re.UI2DTargetRebind = RE_UI2DTargetRebind;
+	re.UiStatsGet = RE_UiStatsGet;
+	re.UiLayerAvailable = RE_UiLayerAvailable;
+	re.BeginUiLayer = RE_BeginUiLayer;
+	re.UiLayerApplyMask = RE_UiLayerApplyMask;
+	re.EndUiLayer = RE_EndUiLayer;
+	re.UiChromeCacheAvailable = RE_UiChromeCacheAvailable;
+	re.BeginUiChromeCacheCapture = RE_BeginUiChromeCacheCapture;
+	re.EndUiChromeCacheCapture = RE_EndUiChromeCacheCapture;
+	re.BlitUiChromeCache = RE_BlitUiChromeCache;
+	re.InvalidateUiChromeCache = RE_InvalidateUiChromeCache;
+	/* Added in Omaha: Phase 4.6 — retained UI target. */
+	re.BeginUI2DTargetKeep = RE_BeginUI2DTargetKeep;
+	re.UI2DClearRectFb = RE_UI2DClearRectFb;
+	re.ClearWorld = RE_ClearWorld;
+	re.LoadMenuWorld = RE_LoadMenuWorld;
+	re.LoadMenuWorldStaged = RE_LoadMenuWorldStaged;
+	re.CommitMenuWorld = RE_CommitMenuWorld;
+	re.CancelMenuWorldStaging = RE_CancelMenuWorldStaging;
+	re.HasActiveWorld = RE_HasActiveWorld;
+	re.ExportModelPreviewPNG = RE_ExportModelPreviewPNG_stub;
 
 	return &re;
 }

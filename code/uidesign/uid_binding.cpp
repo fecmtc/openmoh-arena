@@ -1,0 +1,3537 @@
+/*
+===========================================================================
+Copyright (C) 2026 Project: Omaha
+
+This file is part of Project: Omaha source code.
+
+Project: Omaha builds upon OpenMoHAA / ioquake3 / F.A.K.K. foundations.
+Project: Omaha source code is free software; you can redistribute it
+and/or modify it under the terms of the GNU General Public License as
+published by the Free Software Foundation; either version 2 of the License,
+or (at your option) any later version.
+
+Project: Omaha source code is distributed in the hope that it will be
+useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with Project: Omaha source code; if not, see COPYING.txt in the
+source tree, or write to the Free Software Foundation, Inc.,
+51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+===========================================================================
+*/
+
+#include "uid_binding.h"
+#include "uid_collection.h"
+#include "uid_expr.h"
+#include "uid_expr_bool.h"
+#include "uid_layout.h"
+#include "uid_modal.h"
+#include "uid_paint.h"
+#include "uid_style.h"
+#include "uid_opt.h"
+#include "uid_profile.h"
+#include "uid_string_hash.h"
+#include "uid_value.h"
+#include "uid_vars.h"
+
+#include <cctype>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <functional>
+#include <map>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+namespace {
+
+/* Added in Omaha: frame-scoped cvar read memo — transparent map keys avoid alloc on find. */
+std::map<std::string, std::string, uid_cstring_less> g_cvarMemo;
+bool                                                g_cvarMemoActive = false;
+
+enum {
+	UID_BIND_F_VISIBLE_EXPR = 1u << 0,
+	UID_BIND_F_ENABLED_EXPR = 1u << 1,
+	UID_BIND_F_STYLE = 1u << 2,
+	UID_BIND_F_CVAR_PROPS = 1u << 3,
+	UID_BIND_F_EXPR_PROPS = 1u << 4,
+	UID_BIND_F_BIND = 1u << 5,
+	UID_BIND_F_OPTION_SOURCE = 1u << 6,
+	UID_BIND_F_LABEL = 1u << 7,
+	UID_BIND_F_KEYBIND = 1u << 8,
+	UID_BIND_F_SELECT = 1u << 9
+};
+
+static bool IsTranslateProp(const std::string &name)
+{
+	return name == "translate-x" || name == "translate-y";
+}
+
+/* Added in Omaha: resolve translate length to layout px (post-flow offset). */
+static float ResolveTranslateValuePx(const uid_document_t *doc, const char *valueStr, float percentBase)
+{
+	uid_length_t len{};
+	if (!doc || !valueStr || !valueStr[0]) {
+		return 0.0f;
+	}
+	if (!UID_ParseLength(valueStr, &len, nullptr)) {
+		return 0.0f;
+	}
+	if (len.unit == UID_LENGTH_PERCENT) {
+		return percentBase * (len.value / 100.0f);
+	}
+	if (len.unit == UID_LENGTH_PX) {
+		return UID_ScaleAuthoredPx(doc, len.value);
+	}
+	return 0.0f;
+}
+
+/*
+ * Added in Omaha: translate-x/y change boxes post-flow without full layout.
+ * Queue a delta and mark paint-only; UID_Update applies ShiftSubtreeBoxes.
+ */
+static void QueueTranslatePropChange(
+	uid_document_t *doc,
+	uid_node_id_t nodeId,
+	const std::string &propName,
+	const char *oldValue,
+	const char *newValue
+)
+{
+	if (!doc || nodeId < 0) {
+		return;
+	}
+	const float percentBase = (propName == "translate-y")
+		? static_cast<float>(doc->lastLogicalH > 0 ? doc->lastLogicalH : 0)
+		: static_cast<float>(doc->lastLogicalW > 0 ? doc->lastLogicalW : 0);
+	const float oldPx = ResolveTranslateValuePx(doc, oldValue, percentBase);
+	const float newPx = ResolveTranslateValuePx(doc, newValue, percentBase);
+	const float delta = newPx - oldPx;
+	if (std::fabs(delta) < 1e-6f) {
+		return;
+	}
+	const float dx = (propName == "translate-x") ? delta : 0.0f;
+	const float dy = (propName == "translate-y") ? delta : 0.0f;
+	for (uid_document_t::translate_delta_t &d : doc->pendingTranslateDeltas) {
+		if (d.nodeId == nodeId) {
+			d.dx += dx;
+			d.dy += dy;
+			return;
+		}
+	}
+	uid_document_t::translate_delta_t entry{};
+	entry.nodeId = nodeId;
+	entry.dx = dx;
+	entry.dy = dy;
+	doc->pendingTranslateDeltas.push_back(entry);
+}
+
+static void MarkDirtyAfterPropChange(
+	uid_document_t *doc,
+	uid_node_id_t nodeId,
+	const std::string &propName,
+	const char *oldValue,
+	const char *newValue,
+	const char *const *layoutProps,
+	size_t layoutPropCount,
+	bool strokeLayoutExtra
+)
+{
+	uid_dirty_flags_t dirty = UID_DIRTY_PAINT;
+	/* Changed in Omaha debug: empty prop names were collapsing into "(null)" in reason ranks. */
+	const char *reason = (!propName.empty()) ? propName.c_str() : "prop_empty";
+	if (IsTranslateProp(propName)) {
+		QueueTranslatePropChange(doc, nodeId, propName, oldValue, newValue);
+		/*
+		 * Fixed in Omaha: translate-only motion must not UID_MarkDirty(PAINT) —
+		 * that invalidates the retained chrome list. Box shifts + LIVE_SUBTREE
+		 * paint-list cmds update any bound translate-x/y HUD element.
+		 */
+		return;
+	}
+	for (size_t i = 0; i < layoutPropCount; ++i) {
+		if (propName == layoutProps[i]) {
+			dirty = static_cast<uid_dirty_flags_t>(dirty | UID_DIRTY_LAYOUT);
+			break;
+		}
+	}
+	if (strokeLayoutExtra && (propName == "stroke" || propName == "stroke-width")) {
+		dirty = static_cast<uid_dirty_flags_t>(dirty | UID_DIRTY_LAYOUT);
+	}
+	UID_MarkDirty(doc, dirty, nodeId, reason);
+}
+
+bool TextSizeMayChange(uid_node_kind_t kind)
+{
+	switch (kind) {
+	case UID_NODE_LABEL:
+	case UID_NODE_BUTTON:
+	case UID_NODE_INPUT:
+	case UID_NODE_SELECT:
+	case UID_NODE_KEYBIND:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/*
+ * Added in Omaha: text change only affects geometry when width or height is auto
+ * (content-sized). Explicit px/% boxes are paint-only.
+ */
+bool TextIsContentSized(const uid_node_def_t &node)
+{
+	uid_length_t width;
+	uid_length_t height;
+	width.unit = UID_LENGTH_AUTO;
+	width.value = 0.0f;
+	height.unit = UID_LENGTH_AUTO;
+	height.value = 0.0f;
+	if (!node.properties.GetLengthCached("width", &width)) {
+		width.unit = UID_LENGTH_AUTO;
+	}
+	if (!node.properties.GetLengthCached("height", &height)) {
+		height.unit = UID_LENGTH_AUTO;
+	}
+	return width.unit == UID_LENGTH_AUTO || height.unit == UID_LENGTH_AUTO;
+}
+
+/* Added in Omaha: keep leaf <image> src/fit/scale mirrored onto background-* for paint. */
+void MirrorLeafImageProps(uid_node_def_t *node, const std::string &prop, const std::string &value)
+{
+	if (!node || node->kind != UID_NODE_IMAGE) {
+		return;
+	}
+	if (prop == "src") {
+		node->properties.Set("background-image", value.c_str());
+	} else if (prop == "fit") {
+		node->properties.Set("background-fit", value.c_str());
+	} else if (prop == "scale") {
+		node->properties.Set("background-scale", value.c_str());
+	} else if (prop == "background-image") {
+		node->properties.Set("src", value.c_str());
+	} else if (prop == "background-fit") {
+		node->properties.Set("fit", value.c_str());
+	} else if (prop == "background-scale") {
+		node->properties.Set("scale", value.c_str());
+	}
+}
+
+void TrimInPlace(std::string *s)
+{
+	if (!s) {
+		return;
+	}
+	size_t start = 0;
+	while (start < s->size() && std::isspace(static_cast<unsigned char>((*s)[start]))) {
+		++start;
+	}
+	size_t end = s->size();
+	while (end > start && std::isspace(static_cast<unsigned char>((*s)[end - 1]))) {
+		--end;
+	}
+	if (start == 0 && end == s->size()) {
+		return;
+	}
+	*s = s->substr(start, end - start);
+}
+
+bool StagingBlocksSync(uid_document_t *doc, const uid_node_def_t &node, const uid_node_state_t &st)
+{
+	/* Never clobber an active text edit from an external cvar pulse. */
+	if (st.focused && node.kind == UID_NODE_INPUT) {
+		return true;
+	}
+
+	/* Added in Omaha: slider drag stages runtime until pointer release write. */
+	if (node.kind == UID_NODE_SLIDER && st.dragging) {
+		return true;
+	}
+
+	/*
+	 * Added in Omaha: companion number inputs mirror staged slider values during
+	 * drag — do not pull the old cvar over them until release.
+	 */
+	if (doc && node.kind == UID_NODE_INPUT && node.inputType == "number" && !node.bind.empty()) {
+		for (size_t i = 0; i < doc->nodes.size() && i < doc->states.size(); ++i) {
+			if (doc->nodes[i].kind == UID_NODE_SLIDER && doc->states[i].dragging &&
+				doc->nodes[i].bind == node.bind) {
+				return true;
+			}
+		}
+	}
+
+	/*
+	 * commit=apply keeps UI-staged values until an explicit write/flush.
+	 * After the first sync populates runtimeValue, further pulls are skipped
+	 * so local edits remain until UID_WriteBinding / UID_WriteAllBindings.
+	 */
+	const uid_commit_mode_t mode = node.hasCommit ? node.commit : UID_COMMIT_CHANGE;
+	if (mode == UID_COMMIT_APPLY) {
+		return st.runtimeValue.hasValue;
+	}
+	if (mode == UID_COMMIT_SUBMIT) {
+		if (st.focused) {
+			return true;
+		}
+		if (!st.editBuffer.empty() && st.runtimeValue.hasValue &&
+			st.editBuffer != st.runtimeValue.stringValue) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void SetRuntimeIfChanged(
+	uid_document_t *doc,
+	uid_node_id_t id,
+	uid_node_state_t *st,
+	uid_node_kind_t kind,
+	const std::string &value
+)
+{
+	if (!st) {
+		return;
+	}
+	if (st->runtimeValue.hasValue && st->runtimeValue.stringValue == value) {
+		return;
+	}
+	st->runtimeValue.hasValue = true;
+	st->runtimeValue.stringValue = value;
+	if (TextSizeMayChange(kind)) {
+		const uid_node_def_t *node = UID_GetNode(doc, id);
+		if (node && TextIsContentSized(*node)) {
+			UID_MarkDirty(doc, static_cast<uid_dirty_flags_t>(UID_DIRTY_LAYOUT | UID_DIRTY_PAINT), id, "runtime_text");
+		} else {
+			UID_MarkDirty(doc, UID_DIRTY_PAINT, id, "runtime_text");
+		}
+	} else {
+		UID_MarkDirty(doc, UID_DIRTY_PAINT, id, "runtime_text");
+	}
+}
+
+bool ReadCvarString(const uid_backend_t *backend, const char *name, std::string *out)
+{
+	if (!backend || !backend->cvarDescribe || !name || !out) {
+		return false;
+	}
+	if (g_cvarMemoActive && UID_OptEnabled(UID_OPT_CVAR_MEMO)) {
+		const auto it = g_cvarMemo.find(name);
+		if (it != g_cvarMemo.end()) {
+			*out = it->second;
+			return true;
+		}
+	}
+	char buf[1024];
+	buf[0] = '\0';
+	int flags = 0;
+	if (!backend->cvarDescribe(name, &flags, buf, sizeof(buf))) {
+		return false;
+	}
+	(void)flags;
+	*out = buf;
+	if (g_cvarMemoActive && UID_OptEnabled(UID_OPT_CVAR_MEMO)) {
+		g_cvarMemo.emplace(name, *out);
+		UID_ProfileCountInc(UID_PROF_CNT_NEW); /* string key/value insert (alloc proxy) */
+	}
+	return true;
+}
+
+/* Added in Omaha: invalidate memo when a cvar is written during sync. */
+void InvalidateCvarMemo(const char *name)
+{
+	if (!name || !g_cvarMemoActive) {
+		return;
+	}
+	g_cvarMemo.erase(name);
+}
+
+double ReadCvarNumber(const uid_backend_t *backend, const char *name, double fallback)
+{
+	if (!backend || !name) {
+		return fallback;
+	}
+	/* Prefer numeric backend read — avoids 1 KB string copy + strtod. */
+	if (backend->cvarNumber) {
+		double v = 0.0;
+		if (backend->cvarNumber(name, &v, nullptr)) {
+			return v;
+		}
+		return fallback;
+	}
+	std::string s;
+	if (!ReadCvarString(backend, name, &s) || s.empty()) {
+		return fallback;
+	}
+	char *end = nullptr;
+	UID_ProfileCountInc(UID_PROF_CNT_STRTOD);
+	const double v = std::strtod(s.c_str(), &end);
+	if (end == s.c_str()) {
+		return fallback;
+	}
+	return v;
+}
+
+} // namespace
+
+bool UID_ReadCvarString(const uid_backend_t *backend, const char *name, std::string *out)
+{
+	return ReadCvarString(backend, name, out);
+}
+
+double UID_ReadCvarNumber(const uid_backend_t *backend, const char *name, double fallback)
+{
+	return ReadCvarNumber(backend, name, fallback);
+}
+
+bool UID_ResolvePropString(const uid_backend_t *backend, const std::string &input, std::string *out)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!backend) {
+		*out = input;
+		return true;
+	}
+
+	size_t i = 0;
+	while (i < input.size()) {
+		if (input[i] != '{') {
+			out->push_back(input[i++]);
+			continue;
+		}
+		const size_t end = input.find('}', i + 1);
+		if (end == std::string::npos) {
+			*out = input;
+			return false;
+		}
+		std::string inner = input.substr(i + 1, end - i - 1);
+		size_t b = 0;
+		while (b < inner.size() && std::isspace(static_cast<unsigned char>(inner[b]))) {
+			++b;
+		}
+		size_t e = inner.size();
+		while (e > b && std::isspace(static_cast<unsigned char>(inner[e - 1]))) {
+			--e;
+		}
+		inner = inner.substr(b, e - b);
+		if (inner.compare(0, 4, "cvar") == 0 && inner.size() > 5 && (inner[4] == ':' || inner[4] == '.')) {
+			std::string val;
+			if (!ReadCvarString(backend, inner.substr(5).c_str(), &val)) {
+				return false;
+			}
+			out->append(val);
+		} else {
+			*out = input;
+			return false;
+		}
+		i = end + 1;
+	}
+	return true;
+}
+
+bool UID_ResolveCvarRgba(const uid_backend_t *backend, const char *spec, uid_color_t *out)
+{
+	if (!backend || !spec || !out) {
+		return false;
+	}
+
+	std::string names[4];
+	{
+		std::string s = spec;
+		size_t start = 0;
+		for (int ch = 0; ch < 4; ++ch) {
+			const size_t comma = s.find(',', start);
+			if (ch < 3 && comma == std::string::npos) {
+				return false;
+			}
+			names[ch] = (ch < 3) ? s.substr(start, comma - start) : s.substr(start);
+			size_t b = 0;
+			while (b < names[ch].size() && std::isspace(static_cast<unsigned char>(names[ch][b]))) {
+				++b;
+			}
+			size_t e = names[ch].size();
+			while (e > b && std::isspace(static_cast<unsigned char>(names[ch][e - 1]))) {
+				--e;
+			}
+			names[ch] = names[ch].substr(b, e - b);
+			if (names[ch].empty()) {
+				return false;
+			}
+			start = comma + 1;
+		}
+	}
+
+	double rgba[4];
+	for (int ch = 0; ch < 4; ++ch) {
+		rgba[ch] = ReadCvarNumber(backend, names[ch].c_str(), -1.0);
+		if (rgba[ch] < 0.0) {
+			return false;
+		}
+	}
+
+	out->r = static_cast<float>(rgba[0] / 255.0);
+	out->g = static_cast<float>(rgba[1] / 255.0);
+	out->b = static_cast<float>(rgba[2] / 255.0);
+	out->a = static_cast<float>(rgba[3] / 255.0);
+	return true;
+}
+
+namespace {
+
+/* Added in Omaha: cvar → UI runtime transforms. */
+std::string TransformCvarToUi(
+	const uid_node_def_t &node,
+	const std::string &cvarValue,
+	const uid_backend_t *backend
+)
+{
+	if (node.valueType == "percent") {
+		char *end = nullptr;
+		const double v = std::strtod(cvarValue.c_str(), &end);
+		if (end == cvarValue.c_str()) {
+			return "0";
+		}
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "%.6g", v * 100.0);
+		return buf;
+	}
+	if (node.valueType == "invert-mouse") {
+		char *end = nullptr;
+		const double v = std::strtod(cvarValue.c_str(), &end);
+		if (end == cvarValue.c_str()) {
+			return "0";
+		}
+		return (v < 0.0) ? "1" : "0";
+	}
+	/*
+	 * Added in Omaha: pitch slider edits |m_pitch| while invert-mouse owns the sign.
+	 */
+	if (node.valueType == "pitch-magnitude") {
+		char *end = nullptr;
+		const double v = std::strtod(cvarValue.c_str(), &end);
+		if (end == cvarValue.c_str()) {
+			return "0.022";
+		}
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "%.6g", std::fabs(v));
+		return buf;
+	}
+	if (node.valueType == "cm360") {
+		const double sens = std::strtod(cvarValue.c_str(), nullptr);
+		const double dpi = ReadCvarNumber(backend, "ui_modernsettings_dpi", 800.0);
+		const double yaw = ReadCvarNumber(backend, "m_yaw", 0.022);
+		if (sens <= 0.0 || dpi <= 0.0 || yaw <= 0.0) {
+			return "5";
+		}
+		const double cm = 360.0 * 2.54 / (dpi * sens * yaw);
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "%.6g", cm);
+		return buf;
+	}
+	if (node.valueType == "display-mode") {
+		const int fs = static_cast<int>(std::strtol(cvarValue.c_str(), nullptr, 10));
+		std::string noborder = "0";
+		ReadCvarString(backend, "r_noborder", &noborder);
+		const int nb = static_cast<int>(std::strtol(noborder.c_str(), nullptr, 10));
+		if (fs == 0) {
+			return "0";
+		}
+		if (nb != 0) {
+			return "2";
+		}
+		return "1";
+	}
+	return cvarValue;
+}
+
+/* Added in Omaha: format slider/number display using authored step precision. */
+static std::string FormatControlDisplayValue(const uid_node_def_t &node, const std::string &uiValue)
+{
+	if (node.kind != UID_NODE_SLIDER &&
+		!(node.kind == UID_NODE_INPUT && node.inputType == "number")) {
+		return uiValue;
+	}
+	if (!node.hasStep) {
+		return uiValue;
+	}
+
+	double v = 0.0;
+	if (!UID_ParseNumber(uiValue.c_str(), &v, nullptr)) {
+		return uiValue;
+	}
+
+	char buf[64];
+	if (!UID_FormatNumberForStep(
+			v,
+			node.hasMin ? node.minValue : 0.0,
+			node.hasMax ? node.maxValue : v,
+			node.stepValue,
+			node.hasMin,
+			node.hasMax,
+			node.hasStep,
+			buf,
+			sizeof(buf))) {
+		return uiValue;
+	}
+	return buf;
+}
+
+/* Added in Omaha: UI runtime → cvar transforms. */
+bool TransformUiToCvar(
+	const uid_node_def_t &node,
+	const std::string &uiValue,
+	const uid_backend_t *backend,
+	std::string *outPrimary,
+	std::string *outNoborder /* optional for display-mode */
+)
+{
+	if (!outPrimary) {
+		return false;
+	}
+	if (node.valueType == "percent") {
+		char *end = nullptr;
+		const double v = std::strtod(uiValue.c_str(), &end);
+		if (end == uiValue.c_str()) {
+			return false;
+		}
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "%.6g", v / 100.0);
+		*outPrimary = buf;
+		return true;
+	}
+	if (node.valueType == "invert-mouse") {
+		const bool on = (uiValue == "1" || uiValue == "true" || uiValue == "on");
+		double mag = 0.022;
+		std::string cur;
+		if (ReadCvarString(backend, "m_pitch", &cur)) {
+			const double v = std::strtod(cur.c_str(), nullptr);
+			if (v != 0.0) {
+				mag = std::fabs(v);
+			}
+		}
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "%.6g", on ? -mag : mag);
+		*outPrimary = buf;
+		return true;
+	}
+	/* Added in Omaha: write |m_pitch| while preserving invert-mouse sign. */
+	if (node.valueType == "pitch-magnitude") {
+		char *end = nullptr;
+		const double magIn = std::strtod(uiValue.c_str(), &end);
+		if (end == uiValue.c_str() || !(magIn > 0.0)) {
+			return false;
+		}
+		const double mag = std::fabs(magIn);
+		bool inverted = false;
+		std::string cur;
+		if (ReadCvarString(backend, "m_pitch", &cur)) {
+			const double v = std::strtod(cur.c_str(), nullptr);
+			inverted = (v < 0.0);
+		}
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "%.6g", inverted ? -mag : mag);
+		*outPrimary = buf;
+		return true;
+	}
+	if (node.valueType == "cm360") {
+		char *end = nullptr;
+		const double cm = std::strtod(uiValue.c_str(), &end);
+		if (end == uiValue.c_str() || cm <= 0.0) {
+			return false;
+		}
+		const double dpi = ReadCvarNumber(backend, "ui_modernsettings_dpi", 800.0);
+		const double yaw = ReadCvarNumber(backend, "m_yaw", 0.022);
+		if (dpi <= 0.0 || yaw <= 0.0) {
+			return false;
+		}
+		const double sens = 360.0 * 2.54 / (dpi * cm * yaw);
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "%.6g", sens);
+		*outPrimary = buf;
+		return true;
+	}
+	if (node.valueType == "display-mode") {
+		const int mode = static_cast<int>(std::strtol(uiValue.c_str(), nullptr, 10));
+		if (mode == 0) {
+			*outPrimary = "0";
+			if (outNoborder) {
+				*outNoborder = "0";
+			}
+		} else if (mode == 2) {
+			*outPrimary = "1";
+			if (outNoborder) {
+				*outNoborder = "1";
+			}
+		} else {
+			*outPrimary = "1";
+			if (outNoborder) {
+				*outNoborder = "0";
+			}
+		}
+		return true;
+	}
+	*outPrimary = uiValue;
+	return true;
+}
+
+static void FillBoolLookupCtx(
+	uid_bool_lookup_ctx_t             *ctx,
+	uid_document_t                    *doc,
+	uid_node_id_t                      nodeId,
+	const uid_backend_t               *backend
+)
+{
+	ctx->backend = backend;
+	ctx->doc = doc;
+	ctx->nodeId = nodeId;
+	ctx->item = nullptr;
+	ctx->itemIndex = -1;
+	ctx->itemCount = 0;
+	ctx->selectedIndex = -1;
+	if (nodeId >= 0 && static_cast<size_t>(nodeId) < doc->nodes.size()) {
+		const uid_node_def_t &node = doc->nodes[static_cast<size_t>(nodeId)];
+		if (node.foreachGenerated && node.foreachScopeId >= 0 &&
+		    static_cast<size_t>(node.foreachScopeId) < doc->states.size()) {
+			const uid_node_state_t &scopeSt = doc->states[static_cast<size_t>(node.foreachScopeId)];
+			const int idx = node.foreachItemIndex;
+			ctx->itemIndex = idx;
+			ctx->itemCount = scopeSt.collectionItemCount;
+			ctx->selectedIndex = scopeSt.collectionSelectedIndex;
+			if (idx >= 0 && static_cast<size_t>(idx) < scopeSt.collectionItems.size()) {
+				ctx->item = &scopeSt.collectionItems[static_cast<size_t>(idx)];
+			}
+		}
+	}
+}
+
+struct NumericLookupCtx {
+	uid_bool_lookup_ctx_t boolCtx;
+};
+
+static bool NumericLookupPath(void *userdata, const char *path, double *out)
+{
+	if (!userdata || !path || !out) {
+		return false;
+	}
+	NumericLookupCtx *ctx = static_cast<NumericLookupCtx *>(userdata);
+	const uid_bool_lookup_ctx_t *bc = &ctx->boolCtx;
+
+	if (std::strncmp(path, "cvar.", 5) == 0) {
+		*out = ReadCvarNumber(bc->backend, path + 5, 0.0);
+		return true;
+	}
+	if (std::strncmp(path, "var.", 4) == 0) {
+		return bc->doc && UID_LookupVarNumber(bc->doc, path + 4, out);
+	}
+	if (std::strcmp(path, "item.count") == 0) {
+		*out = static_cast<double>(bc->itemCount);
+		return true;
+	}
+	if (std::strcmp(path, "item.index") == 0 && bc->itemIndex >= 0) {
+		*out = static_cast<double>(bc->itemIndex);
+		return true;
+	}
+	if (std::strcmp(path, "item.lifetime_alpha") == 0) {
+		*out = static_cast<double>(UID_EvalItemLifetimeAlpha(bc->doc, bc->nodeId));
+		return true;
+	}
+	if (bc->item && std::strncmp(path, "item.field.", 11) == 0) {
+		const std::string fname(path + 11);
+		auto it = bc->item->fields.find(fname);
+		if (it != bc->item->fields.end()) {
+			char *end = nullptr;
+			const double v = std::strtod(it->second.c_str(), &end);
+			if (end != it->second.c_str()) {
+				*out = v;
+				return true;
+			}
+		}
+		return false;
+	}
+	return false;
+}
+
+static std::string FormatEvaluatedNumber(double value)
+{
+	char buf[64];
+	UID_ProfileCountInc(UID_PROF_CNT_SNPRINTF);
+	if (std::fabs(value - std::floor(value)) < 1e-9) {
+		std::snprintf(buf, sizeof(buf), "%.0f", value);
+	} else {
+		std::snprintf(buf, sizeof(buf), "%.15g", value);
+	}
+	return std::string(buf);
+}
+
+static bool ExtractBraceExprAndSuffix(const std::string &value, std::string *exprOut, std::string *suffixOut)
+{
+	if (!exprOut || !suffixOut) {
+		return false;
+	}
+	exprOut->clear();
+	suffixOut->clear();
+	size_t start = value.find('{');
+	if (start == std::string::npos) {
+		return false;
+	}
+	const size_t end = value.find('}', start + 1);
+	if (end == std::string::npos) {
+		return false;
+	}
+	*exprOut = value.substr(start + 1, end - start - 1);
+	if (end + 1 < value.size()) {
+		*suffixOut = value.substr(end + 1);
+	}
+	return true;
+}
+
+static bool IsExprBoundPropValue(const std::string &value)
+{
+	if (value.find('{') == std::string::npos || value.find('}') == std::string::npos) {
+		return false;
+	}
+	std::string cvarName;
+	if (UID_ParseExactCvarBraceBinding(value, &cvarName)) {
+		return false;
+	}
+	std::string expr;
+	std::string suffix;
+	if (!ExtractBraceExprAndSuffix(value, &expr, &suffix)) {
+		return false;
+	}
+	if (expr.find('?') != std::string::npos) {
+		return false;
+	}
+	return true;
+}
+
+static bool EvalRuntimeNumericExprImpl(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	const std::string   &expr,
+	const uid_backend_t *backend,
+	double              *out
+)
+{
+	if (!doc || !backend || !out || expr.empty()) {
+		return false;
+	}
+	std::string inner = expr;
+	std::string suffix;
+	if (inner.front() == '{' && inner.back() == '}') {
+		inner = inner.substr(1, inner.size() - 2);
+	} else if (!ExtractBraceExprAndSuffix(expr, &inner, &suffix)) {
+		inner = expr;
+	}
+	TrimInPlace(&inner);
+	if (inner.empty()) {
+		return false;
+	}
+	NumericLookupCtx ctx;
+	FillBoolLookupCtx(&ctx.boolCtx, doc, nodeId, backend);
+	uid_expr_limits_t lim;
+	UID_DefaultExprLimits(&lim);
+	std::string diag;
+	return UID_EvalNumber(inner.c_str(), NumericLookupPath, &ctx, &lim, out, &diag);
+}
+
+static bool ResolveAllRuntimeNumericBraceExprs(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	const std::string   &authored,
+	const uid_backend_t *backend,
+	std::string         *out
+)
+{
+	if (!out) {
+		return false;
+	}
+	if (authored.find('{') == std::string::npos) {
+		return false;
+	}
+
+	std::string cur = authored;
+	for (int guard = 0; guard < 64; ++guard) {
+		const size_t start = cur.find('{');
+		if (start == std::string::npos) {
+			*out = cur;
+			return true;
+		}
+		const size_t end = cur.find('}', start + 1);
+		if (end == std::string::npos) {
+			return false;
+		}
+		std::string expr = cur.substr(start + 1, end - start - 1);
+		TrimInPlace(&expr);
+		double value = 0.0;
+		if (!EvalRuntimeNumericExprImpl(doc, nodeId, expr, backend, &value)) {
+			return false;
+		}
+		const size_t after = end + 1;
+		size_t       tokenEnd = after;
+		while (tokenEnd < cur.size() && !std::isspace(static_cast<unsigned char>(cur[tokenEnd]))) {
+			++tokenEnd;
+		}
+		const std::string unitSuffix = cur.substr(after, tokenEnd - after);
+		const std::string replacement = FormatEvaluatedNumber(value) + unitSuffix;
+		cur.replace(start, tokenEnd - start, replacement);
+	}
+	return false;
+}
+
+static bool ResolveRuntimeNumericPropValue(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	const std::string   &authored,
+	const uid_backend_t *backend,
+	std::string         *out
+)
+{
+	return ResolveAllRuntimeNumericBraceExprs(doc, nodeId, authored, backend, out);
+}
+
+/*
+ * Added in Omaha: single `{expr}` (+ optional unit suffix) → double without formatting.
+ * Multi-brace authored strings fall through to the string resolve path.
+ */
+static bool TryEvalSingleNumericAuthored(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	const std::string   &authored,
+	const uid_backend_t *backend,
+	double              *outValue,
+	std::string         *outSuffix
+)
+{
+	if (!outValue || !outSuffix || authored.empty()) {
+		return false;
+	}
+	outSuffix->clear();
+	size_t start = 0;
+	while (start < authored.size() && std::isspace(static_cast<unsigned char>(authored[start]))) {
+		++start;
+	}
+	if (start >= authored.size() || authored[start] != '{') {
+		return false;
+	}
+	const size_t end = authored.find('}', start + 1);
+	if (end == std::string::npos) {
+		return false;
+	}
+	if (authored.find('{', end + 1) != std::string::npos) {
+		return false;
+	}
+	std::string expr = authored.substr(start + 1, end - start - 1);
+	TrimInPlace(&expr);
+	if (expr.empty() || expr.find('?') != std::string::npos) {
+		return false;
+	}
+	if (!EvalRuntimeNumericExprImpl(doc, nodeId, expr, backend, outValue)) {
+		return false;
+	}
+	size_t after = end + 1;
+	while (after < authored.size() && !std::isspace(static_cast<unsigned char>(authored[after]))) {
+		++after;
+	}
+	*outSuffix = authored.substr(end + 1, after - (end + 1));
+	return true;
+}
+
+static bool ExprLooksCvarPure(const std::string &expr)
+{
+	/* Added in Omaha: cvar/var/literal-only exprs can be memoized on cvar epoch. */
+	if (expr.find("item.") != std::string::npos) {
+		return false;
+	}
+	/*
+	 * Fixed in Omaha: bind.selected / bind.value are node-local (set-value peers).
+	 * Memoizing them on cvar epoch stuck Off/On fills when Cvar_Set was a no-op.
+	 */
+	if (expr.find("bind.") != std::string::npos) {
+		return false;
+	}
+	if (expr.find("lifetime") != std::string::npos) {
+		return false;
+	}
+	if (expr.find("hover") != std::string::npos || expr.find("focus") != std::string::npos
+		|| expr.find("pressed") != std::string::npos) {
+		return false;
+	}
+	/* Bare "index" / "collection." are host/runtime, not pure cvar. */
+	if (expr.find("index") != std::string::npos || expr.find("collection.") != std::string::npos) {
+		return false;
+	}
+	return true;
+}
+
+/*
+ * Stage 6b: nodes whose bind body only depends on cvars (no item/bind/hover/
+ * foreach field / keybind / option refresh) can skip the whole body when the
+ * global cvar epoch is unchanged.
+ */
+static bool NodeBindBodyIsCvarPure(const uid_node_def_t *node)
+{
+	if (!node) {
+		return false;
+	}
+	const unsigned flags = node->bindingFlags;
+	if (flags & (UID_BIND_F_EXPR_PROPS | UID_BIND_F_KEYBIND)) {
+		return false;
+	}
+	if ((flags & UID_BIND_F_SELECT) && (flags & UID_BIND_F_OPTION_SOURCE)) {
+		return false;
+	}
+	if (!node->visibleExpr.empty() && !ExprLooksCvarPure(node->visibleExpr)) {
+		return false;
+	}
+	if (!node->enabledExpr.empty() && !ExprLooksCvarPure(node->enabledExpr)) {
+		return false;
+	}
+	for (const auto &kv : node->styleExprs) {
+		if (!kv.second.empty() && !ExprLooksCvarPure(kv.second)) {
+			return false;
+		}
+	}
+	if (flags & UID_BIND_F_LABEL) {
+		if (node->foreachGenerated && node->text.find("{item.") != std::string::npos) {
+			return false;
+		}
+		const char *tc = node->properties.GetCStr("text-cvar", nullptr);
+		if (!(tc && tc[0]) && !node->text.empty() && node->text.find('{') != std::string::npos) {
+			std::string cvarName;
+			if (!UID_ParseExactCvarBraceBinding(node->text, &cvarName)) {
+				/* Interpolated / join / mixed braces need runtime each frame. */
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+static bool NodeBindInteractionDirty(const uid_node_state_t *st)
+{
+	return st && (st->hovered || st->pressed || st->focused || st->capturing || st->dragging);
+}
+
+static bool EvalNodeBoolExpr(
+	const std::string             &expr,
+	uid_document_t                *doc,
+	uid_node_id_t                  nodeId,
+	const uid_backend_t           *backend
+)
+{
+	if (expr.empty()) {
+		return true;
+	}
+	uid_bool_lookup_ctx_t ctx;
+	FillBoolLookupCtx(&ctx, doc, nodeId, backend);
+	bool result = true;
+	std::string diag;
+	if (!UID_EvalBool(expr.c_str(), &ctx, nullptr, &result, &diag)) {
+		return false;
+	}
+	return result;
+}
+
+static bool EvalNodeBoolExprCached(
+	const std::string   &expr,
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	const uid_backend_t *backend,
+	uid_node_state_t    *st,
+	bool                 forVisible
+)
+{
+	if (expr.empty()) {
+		return true;
+	}
+	/* Only memoize when the host exposes a real cvar epoch (tests often omit it). */
+	const bool canMemo = UID_OptEnabled(UID_OPT_EXPR_CACHE) && st && backend && backend->cvarEpoch
+		&& ExprLooksCvarPure(expr);
+	const unsigned epoch = canMemo ? backend->cvarEpoch() : 0u;
+	if (canMemo) {
+		if (forVisible && st->visibleCached && st->visibleEpoch == epoch) {
+			return st->visibleCachedValue;
+		}
+		if (!forVisible && st->enabledCached && st->enabledEpoch == epoch) {
+			return st->enabledCachedValue;
+		}
+	}
+	const bool result = EvalNodeBoolExpr(expr, doc, nodeId, backend);
+	if (canMemo) {
+		if (forVisible) {
+			st->visibleEpoch = epoch;
+			st->visibleCached = true;
+			st->visibleCachedValue = result;
+		} else {
+			st->enabledEpoch = epoch;
+			st->enabledCached = true;
+			st->enabledCachedValue = result;
+		}
+	}
+	return result;
+}
+
+/* Added in Omaha: sync style ternaries (any property) into resolved property values. */
+static void SyncBoundStyleExprs(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	uid_node_def_t      *node,
+	const uid_backend_t *backend
+)
+{
+	if (!doc || !node || node->styleExprs.empty()) {
+		return;
+	}
+
+	uid_node_state_t *st = nullptr;
+	if (nodeId >= 0 && static_cast<size_t>(nodeId) < doc->states.size()) {
+		st = &doc->states[static_cast<size_t>(nodeId)];
+	}
+	bool allCvarPure = true;
+	for (const auto &kv : node->styleExprs) {
+		if (!kv.second.empty() && !ExprLooksCvarPure(kv.second)) {
+			allCvarPure = false;
+			break;
+		}
+	}
+	const bool canMemo = UID_OptEnabled(UID_OPT_EXPR_CACHE) && allCvarPure && st && backend
+		&& backend->cvarEpoch;
+	const unsigned epoch = canMemo ? backend->cvarEpoch() : 0u;
+	if (canMemo && st->styleExprCached && st->styleExprEpoch == epoch) {
+		return;
+	}
+
+	static const char *kLayoutProps[] = {
+		"width", "height", "gap", "margin", "padding", "font-size",
+		"src" /* Added in Omaha: leaf <image> intrinsic size depends on src */
+	};
+	bool strokeLayout = true;
+	{
+		const char *sl = node->properties.GetCStr("stroke-layout", nullptr);
+		if (sl && sl[0]) {
+			(void)UID_ParseBool(sl, &strokeLayout, nullptr);
+		}
+	}
+	uid_bool_lookup_ctx_t ctx;
+	FillBoolLookupCtx(&ctx, doc, nodeId, backend);
+	for (const auto &kv : node->styleExprs) {
+		if (kv.second.empty()) {
+			continue;
+		}
+		std::string resolved;
+		std::string diag;
+		if (!UID_EvalStyleTernary(kv.second.c_str(), &ctx, nullptr, &resolved, &diag)) {
+			continue;
+		}
+		const char *cur = node->properties.GetCStr(kv.first.c_str(), nullptr);
+		if (cur && resolved == cur) {
+			continue;
+		}
+		const std::string oldVal = cur ? cur : "";
+		node->properties.Set(kv.first.c_str(), resolved.c_str());
+		if (st) {
+			UID_InvalidateComputedStyle(st);
+		}
+		/* Changed in Omaha: hoverfill aliases share one resolved value. */
+		if (kv.first == "hoverfill") {
+			node->properties.Set("hover-fill", resolved.c_str());
+		} else if (kv.first == "hover-fill") {
+			node->properties.Set("hoverfill", resolved.c_str());
+		}
+		MirrorLeafImageProps(node, kv.first, resolved);
+		MarkDirtyAfterPropChange(
+			doc,
+			nodeId,
+			kv.first,
+			oldVal.c_str(),
+			resolved.c_str(),
+			kLayoutProps,
+			sizeof(kLayoutProps) / sizeof(kLayoutProps[0]),
+			strokeLayout
+		);
+	}
+
+	if (canMemo) {
+		st->styleExprEpoch = epoch;
+		st->styleExprCached = true;
+	} else if (st) {
+		st->styleExprCached = false;
+	}
+}
+
+std::string FormatKeybindKeyName(const char *name)
+{
+	if (!name || !name[0]) {
+		return std::string();
+	}
+	if (name[1] == '\0') {
+		const unsigned char c = static_cast<unsigned char>(name[0]);
+		if (c >= 'a' && c <= 'z') {
+			char buf[2];
+			buf[0] = static_cast<char>(std::toupper(c));
+			buf[1] = '\0';
+			return buf;
+		}
+	}
+	return name;
+}
+
+/*
+ * Fixed in Omaha: Quake/MOHAA letter binds are lowercase ASCII ('w' == 119).
+ * Display labels may show "W"; never store uppercase letter keynums.
+ */
+int NormalizeBindKey(int key)
+{
+	if (key >= 'A' && key <= 'Z') {
+		return key + ('a' - 'A');
+	}
+	return key;
+}
+
+int KeybindSlotIndex(const uid_node_def_t &node)
+{
+	return node.bindSlot != 0 ? 1 : 0;
+}
+
+const char *KeybindModalCvarName(const uid_node_def_t &node)
+{
+	if (!node.modalCvar.empty()) {
+		return node.modalCvar.c_str();
+	}
+	return UID_DefaultModalCvarName();
+}
+
+bool ParseCapturedKey(const std::string &val, const uid_backend_t *backend, int *outKey)
+{
+	if (!outKey) {
+		return false;
+	}
+	if (backend && backend->keyNameToNum && backend->keyNameToNum(val.c_str(), outKey)) {
+		return true;
+	}
+	char *end = nullptr;
+	const long n = std::strtol(val.c_str(), &end, 10);
+	if (end && end != val.c_str() && *end == '\0') {
+		*outKey = static_cast<int>(n);
+		return true;
+	}
+	return false;
+}
+
+void SyncTextCvarLabel(
+	uid_document_t *doc,
+	uid_node_id_t id,
+	uid_node_def_t *node,
+	uid_node_state_t *st,
+	const uid_backend_t *backend
+)
+{
+	const char *tc = node->properties.GetCStr("text-cvar", nullptr);
+	if (!tc || !tc[0]) {
+		return;
+	}
+	/* Stage 6b: skip read/assign when this cvar's modificationCount is unchanged. */
+	if (st && backend && backend->cvarNumber) {
+		double unused = 0.0;
+		unsigned mod = 0;
+		if (backend->cvarNumber(tc, &unused, &mod) && st->labelCvarModCount == mod &&
+		    st->runtimeValue.hasValue) {
+			return;
+		}
+		st->labelCvarModCount = mod;
+	}
+	std::string value;
+	if (!ReadCvarString(backend, tc, &value)) {
+		value.clear();
+	}
+	SetRuntimeIfChanged(doc, id, st, node->kind, value);
+}
+
+void SyncCvarBind(
+	uid_document_t *doc,
+	uid_node_id_t id,
+	uid_node_def_t *node,
+	uid_node_state_t *st,
+	const uid_backend_t *backend,
+	const std::string &cvarName
+)
+{
+	if (!backend || !backend->cvarDescribe || !node || !st) {
+		return;
+	}
+	if (StagingBlocksSync(doc, *node, *st)) {
+		return;
+	}
+
+	/* Stage 6b: unchanged cvar → runtime value already current. */
+	if (backend->cvarNumber) {
+		double unused = 0.0;
+		unsigned mod = 0;
+		if (backend->cvarNumber(cvarName.c_str(), &unused, &mod) && st->bindPrimaryModCount == mod &&
+		    st->runtimeValue.hasValue) {
+			return;
+		}
+		st->bindPrimaryModCount = mod;
+	}
+
+	/* Stage 6: route through frame memo / host describe cache (was direct describe). */
+	std::string value;
+	if (!ReadCvarString(backend, cvarName.c_str(), &value)) {
+		return;
+	}
+	// Changed in MoH Arena: the value is shown as it is. Omaha rewrote
+	// com_maxfps, in_mouse and r_lodscale here when they were not among the
+	// menu's options.
+	const std::string ui = TransformCvarToUi(*node, value, backend);
+	SetRuntimeIfChanged(doc, id, st, node->kind, FormatControlDisplayValue(*node, ui));
+	/* Sync from live cvar is not a user Apply edit. */
+	st->applyUserEdited = false;
+}
+
+void SyncKeybindDisplay(
+	uid_document_t *doc,
+	uid_node_id_t id,
+	uid_node_def_t *node,
+	uid_node_state_t *st,
+	const uid_backend_t *backend
+)
+{
+	if (!backend || !node || !st || node->binding.empty()) {
+		return;
+	}
+	if (st->capturing) {
+		return;
+	}
+
+	std::string display;
+	int key1 = -1;
+	int key2 = -1;
+	if (backend->getKeysForCommand) {
+		backend->getKeysForCommand(node->binding.c_str(), &key1, &key2);
+	}
+
+	// Changed in MoH Arena: a key row shows the binds as they are. Omaha moved
+	// a bind on an uppercase letter key to the lowercase key here.
+
+	const int slot = KeybindSlotIndex(*node);
+	const int key = (slot == 1) ? key2 : key1;
+	if (key >= 0 && backend->keyNumToName) {
+		char name[64];
+		name[0] = '\0';
+		if (backend->keyNumToName(key, name, sizeof(name)) && name[0]) {
+			display = FormatKeybindKeyName(name);
+		}
+	}
+
+	if (display.empty()) {
+		display = UID_KeybindEmptyLabel(*node);
+	}
+	SetRuntimeIfChanged(doc, id, st, node->kind, display);
+}
+
+void RefreshOptionSource(
+	uid_document_t *doc,
+	uid_node_def_t *node,
+	const uid_backend_t *backend
+)
+{
+	if (!doc || !node || !backend || !backend->queryOptions) {
+		return;
+	}
+	if (node->optionSource.empty()) {
+		return;
+	}
+	/* Cache: only query when options have not been populated yet. */
+	if (!node->options.empty()) {
+		return;
+	}
+
+	const int maxOpts = doc->limits.maxOptionsPerSelect > 0 ? doc->limits.maxOptionsPerSelect : 512;
+	std::vector<char *> values(static_cast<size_t>(maxOpts), nullptr);
+	std::vector<char *> labels(static_cast<size_t>(maxOpts), nullptr);
+	const int n = backend->queryOptions(
+		node->optionSource.c_str(),
+		values.data(),
+		labels.data(),
+		maxOpts
+	);
+	if (n <= 0) {
+		return;
+	}
+
+	const int count = n < maxOpts ? n : maxOpts;
+	node->options.clear();
+	node->options.reserve(static_cast<size_t>(count));
+	for (int i = 0; i < count; ++i) {
+		uid_select_option_t opt;
+		opt.value = values[static_cast<size_t>(i)] ? values[static_cast<size_t>(i)] : "";
+		opt.label = labels[static_cast<size_t>(i)] ? labels[static_cast<size_t>(i)] : opt.value;
+		node->options.push_back(opt);
+	}
+	UID_MarkDirty(doc, static_cast<uid_dirty_flags_t>(UID_DIRTY_LAYOUT | UID_DIRTY_PAINT), UID_INVALID_NODE_ID, "option_source");
+}
+
+uid_result_t WriteCvarBind(
+	uid_node_def_t *node,
+	uid_node_state_t *st,
+	const uid_backend_t *backend,
+	const std::string &cvarName
+)
+{
+	if (!backend || !backend->cvarWrite || !node || !st) {
+		return UID_ERR_INVALID_ARG;
+	}
+	if (!st->runtimeValue.hasValue) {
+		return UID_ERR_NOT_READY;
+	}
+
+	int flags = 0;
+	char valueBuf[8];
+	valueBuf[0] = '\0';
+	if (backend->cvarDescribe) {
+		if (backend->cvarDescribe(cvarName.c_str(), &flags, valueBuf, sizeof(valueBuf))) {
+			if (flags & UID_CVAR_WRITE_DENIED) {
+				return UID_ERR_VALIDATE;
+			}
+		}
+	}
+
+	std::string primary;
+	std::string noborder;
+	if (!TransformUiToCvar(*node, st->runtimeValue.stringValue, backend, &primary, &noborder)) {
+		return UID_ERR_VALIDATE;
+	}
+
+	if (!backend->cvarWrite(cvarName.c_str(), primary.c_str())) {
+		return UID_ERR_VALIDATE;
+	}
+	/* Added in Omaha: display-mode also drives r_noborder. */
+	if (node->valueType == "display-mode" && !noborder.empty()) {
+		backend->cvarWrite("r_noborder", noborder.c_str());
+	}
+	return UID_OK;
+}
+
+uid_result_t CommitKeybindSlot(
+	const char *command,
+	int slot,
+	int newKey,
+	bool haveNewKey,
+	const uid_backend_t *backend
+)
+{
+	if (!backend || !backend->setBinding || !command || !command[0]) {
+		return UID_ERR_INVALID_ARG;
+	}
+	if (!backend->getKeysForCommand) {
+		return UID_ERR_NOT_READY;
+	}
+
+	if (haveNewKey) {
+		newKey = NormalizeBindKey(newKey);
+	}
+
+	int key1 = -1;
+	int key2 = -1;
+	backend->getKeysForCommand(command, &key1, &key2);
+
+	if (!haveNewKey) {
+		if (slot == 0) {
+			if (key1 >= 0) {
+				backend->setBinding(key1, "");
+			}
+		} else {
+			if (key2 >= 0) {
+				backend->setBinding(key2, "");
+			}
+		}
+		return UID_OK;
+	}
+
+	if (slot == 0) {
+		if (key1 == newKey) {
+			return UID_OK;
+		}
+		if (key2 == newKey) {
+			if (key1 >= 0) {
+				backend->setBinding(key1, "");
+			}
+			if (key2 >= 0) {
+				backend->setBinding(key2, "");
+			}
+			backend->setBinding(newKey, command);
+			return UID_OK;
+		}
+		if (key1 >= 0) {
+			backend->setBinding(key1, "");
+		}
+		backend->setBinding(newKey, command);
+		return UID_OK;
+	}
+
+	if (key2 == newKey) {
+		return UID_OK;
+	}
+	if (key1 == newKey) {
+		if (key2 >= 0) {
+			backend->setBinding(key2, "");
+		}
+		return UID_OK;
+	}
+	if (key2 >= 0) {
+		backend->setBinding(key2, "");
+	}
+	backend->setBinding(newKey, command);
+	return UID_OK;
+}
+
+uid_result_t WriteKeybind(
+	uid_node_def_t *node,
+	uid_node_state_t *st,
+	const uid_backend_t *backend
+)
+{
+	if (!backend || !node || !st || node->binding.empty()) {
+		return UID_ERR_INVALID_ARG;
+	}
+	if (!backend->setBinding) {
+		return UID_ERR_NOT_READY;
+	}
+
+	/*
+	 * Fixed in Omaha: runtimeValue holds display labels ("W", "NONE"), not capture
+	 * keynums. Capture commits via UID_TryCommitKeybindCapture. Only empty value
+	 * means clear this slot (Backspace / Del).
+	 */
+	if (st->runtimeValue.hasValue && !st->runtimeValue.stringValue.empty()) {
+		return UID_OK;
+	}
+
+	return CommitKeybindSlot(node->binding.c_str(), KeybindSlotIndex(*node), 0, false, backend);
+}
+
+uid_result_t TryCommitKeybindCaptureImpl(
+	uid_document_t *doc,
+	uid_node_id_t nodeId,
+	int capturedKey,
+	const uid_backend_t *backend
+)
+{
+	if (!doc || !backend || nodeId == UID_INVALID_NODE_ID) {
+		return UID_ERR_INVALID_ARG;
+	}
+	uid_node_def_t *node = UID_GetNode(doc, nodeId);
+	if (!node || node->kind != UID_NODE_KEYBIND) {
+		return UID_ERR_INVALID_ARG;
+	}
+	if (static_cast<size_t>(nodeId) >= doc->states.size()) {
+		return UID_ERR_INVALID_ARG;
+	}
+	uid_node_state_t *st = &doc->states[static_cast<size_t>(nodeId)];
+
+	char existing[256];
+	existing[0] = '\0';
+	if (backend->getBinding) {
+		backend->getBinding(capturedKey, existing, sizeof(existing));
+	}
+
+	const bool conflict =
+		existing[0] != '\0' && std::strcmp(existing, node->binding.c_str()) != 0;
+
+	if (conflict && !node->confirmModal.empty() && backend->cvarWrite) {
+		char keyName[64];
+		keyName[0] = '\0';
+		if (backend->keyNumToName) {
+			backend->keyNumToName(capturedKey, keyName, sizeof(keyName));
+		}
+		const std::string displayKey = FormatKeybindKeyName(keyName);
+
+		std::string message;
+		if (!displayKey.empty() && existing[0]) {
+			message = displayKey + " is already bound to " + existing + ". Overwrite?";
+		} else if (!displayKey.empty()) {
+			message = displayKey + " is already bound. Overwrite?";
+		} else {
+			message = "This key is already bound. Overwrite?";
+		}
+
+		char keyBuf[32];
+		std::snprintf(keyBuf, sizeof(keyBuf), "%d", capturedKey);
+		const int slot = KeybindSlotIndex(*node);
+		const char *slotStr = slot == 1 ? "secondary" : "primary";
+
+		backend->cvarWrite("ui_modal_message", message.c_str());
+		backend->cvarWrite("ui_modal_bind_command", node->binding.c_str());
+		backend->cvarWrite("ui_modal_bind_key", keyBuf);
+		backend->cvarWrite("ui_modal_bind_slot", slotStr);
+		backend->cvarWrite("ui_modal_bind_existing", existing);
+		backend->cvarWrite("ui_modal_confirm_invoke", "modal-commit-keybind");
+
+		doc->keybindPending.active = true;
+		doc->keybindPending.nodeId = nodeId;
+		doc->keybindPending.slot = slot;
+		doc->keybindPending.newKey = capturedKey;
+		doc->keybindPending.command = node->binding;
+
+		backend->cvarWrite(KeybindModalCvarName(*node), node->confirmModal.c_str());
+		SyncKeybindDisplay(doc, nodeId, node, st, backend);
+		UID_MarkDirty(doc, static_cast<uid_dirty_flags_t>(UID_DIRTY_BINDING | UID_DIRTY_LAYOUT | UID_DIRTY_PAINT), nodeId, "keybind_modal");
+		return UID_OK;
+	}
+
+	if (const uid_result_t r = CommitKeybindSlot(
+			node->binding.c_str(),
+			KeybindSlotIndex(*node),
+			capturedKey,
+			true,
+			backend
+		);
+		r != UID_OK) {
+		return r;
+	}
+	SyncKeybindDisplay(doc, nodeId, node, st, backend);
+	return UID_OK;
+}
+
+uid_result_t CommitKeybindFromModalCvarsImpl(uid_document_t *doc, const uid_backend_t *backend)
+{
+	if (!doc || !backend || !backend->cvarDescribe || !backend->setBinding) {
+		return UID_ERR_INVALID_ARG;
+	}
+
+	char command[256];
+	char keyBuf[64];
+	char slotBuf[32];
+	command[0] = '\0';
+	keyBuf[0] = '\0';
+	slotBuf[0] = '\0';
+	int flags = 0;
+	if (!backend->cvarDescribe("ui_modal_bind_command", &flags, command, sizeof(command))) {
+		return UID_ERR_VALIDATE;
+	}
+	if (!backend->cvarDescribe("ui_modal_bind_key", &flags, keyBuf, sizeof(keyBuf))) {
+		return UID_ERR_VALIDATE;
+	}
+	if (!backend->cvarDescribe("ui_modal_bind_slot", &flags, slotBuf, sizeof(slotBuf))) {
+		slotBuf[0] = '\0';
+	}
+
+	int newKey = 0;
+	if (!ParseCapturedKey(keyBuf, backend, &newKey)) {
+		return UID_ERR_VALIDATE;
+	}
+
+	int slot = 0;
+	if (std::strcmp(slotBuf, "secondary") == 0) {
+		slot = 1;
+	}
+
+	const uid_result_t r = CommitKeybindSlot(command, slot, newKey, true, backend);
+	if (r != UID_OK) {
+		return r;
+	}
+
+	const uid_node_id_t pendingId = doc->keybindPending.nodeId;
+	doc->keybindPending.active = false;
+
+	if (pendingId != UID_INVALID_NODE_ID && static_cast<size_t>(pendingId) < doc->states.size()) {
+		uid_node_def_t *node = UID_GetNode(doc, pendingId);
+		uid_node_state_t *st = &doc->states[static_cast<size_t>(pendingId)];
+		if (node) {
+			SyncKeybindDisplay(doc, pendingId, node, st, backend);
+		}
+	}
+
+	const size_t n = doc->nodes.size() < doc->states.size() ? doc->nodes.size() : doc->states.size();
+	for (size_t i = 0; i < n; ++i) {
+		if (doc->nodes[i].kind != UID_NODE_KEYBIND) {
+			continue;
+		}
+		if (doc->nodes[i].binding == command) {
+			SyncKeybindDisplay(
+				doc,
+				static_cast<uid_node_id_t>(i),
+				&doc->nodes[i],
+				&doc->states[i],
+				backend
+			);
+		}
+	}
+
+	return UID_OK;
+}
+
+static std::string SubstituteAllItemFieldTokens(const uid_collection_entry_t *item, const std::string &input)
+{
+	if (!item || input.find("item.field.") == std::string::npos) {
+		return input;
+	}
+	std::string out;
+	out.reserve(input.size());
+	for (size_t i = 0; i < input.size();) {
+		if (input[i] != '{') {
+			out.push_back(input[i++]);
+			continue;
+		}
+		const size_t end = input.find('}', i + 1);
+		if (end == std::string::npos) {
+			out.push_back(input[i++]);
+			continue;
+		}
+		const std::string key = input.substr(i + 1, end - i - 1);
+		if (key.rfind("item.field.", 0) == 0) {
+			const std::string fname = key.substr(11);
+			auto it = item->fields.find(fname);
+			if (it != item->fields.end()) {
+				out += it->second;
+			} else {
+				out += input.substr(i, end - i + 1);
+			}
+		} else {
+			out += input.substr(i, end - i + 1);
+		}
+		i = end + 1;
+	}
+	return out;
+}
+
+static void SyncExprBoundProps(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	uid_node_def_t      *node,
+	const uid_backend_t *backend
+)
+{
+	if (!doc || !node || !backend) {
+		return;
+	}
+	static const char *kLayoutProps[] = {
+		"width", "height", "gap", "margin", "padding", "font-size",
+		"src" /* Added in Omaha: leaf <image> intrinsic size depends on src */
+	};
+	for (const auto &kv : node->exprBoundProps) {
+		uid_bool_lookup_ctx_t ctx;
+		FillBoolLookupCtx(&ctx, doc, nodeId, backend);
+		std::string authored = kv.second;
+		if (ctx.item) {
+			authored = SubstituteAllItemFieldTokens(ctx.item, authored);
+		}
+
+		std::string resolved;
+		bool        ok = false;
+		/* Prefer double compare before FormatEvaluatedNumber + properties.Set. */
+		{
+			double      numVal = 0.0;
+			std::string unitSuffix;
+			if (TryEvalSingleNumericAuthored(doc, nodeId, authored, backend, &numVal, &unitSuffix)) {
+				if (unitSuffix.empty()) {
+					double curNum = 0.0;
+					if (node->properties.GetNumberCached(kv.first.c_str(), &curNum)
+						&& std::fabs(curNum - numVal) < 1e-9) {
+						continue;
+					}
+				}
+				resolved = FormatEvaluatedNumber(numVal) + unitSuffix;
+				ok = true;
+			}
+		}
+		if (!ok) {
+			ok = ResolveRuntimeNumericPropValue(doc, nodeId, authored, backend, &resolved);
+		}
+		if (!ok && authored.find('{') == std::string::npos) {
+			resolved = authored;
+			ok = !resolved.empty();
+		}
+		if (!ok) {
+			/* String / ternary item.field props (color hex, font-weight ternary, …). */
+			std::string expr;
+			std::string suffix;
+			if (authored.size() >= 2 && authored.front() == '{' && authored.back() == '}') {
+				expr = authored.substr(1, authored.size() - 2);
+			} else if (!ExtractBraceExprAndSuffix(authored, &expr, &suffix)) {
+				continue;
+			}
+			TrimInPlace(&expr);
+			if (expr.find('?') != std::string::npos) {
+				std::string diag;
+				if (!UID_EvalStyleTernary(expr.c_str(), &ctx, nullptr, &resolved, &diag)) {
+					continue;
+				}
+				resolved += suffix;
+				ok = true;
+			} else if (ctx.item && expr.rfind("item.field.", 0) == 0) {
+				const std::string fname = expr.substr(11);
+				auto it = ctx.item->fields.find(fname);
+				if (it == ctx.item->fields.end()) {
+					continue;
+				}
+				resolved = it->second + suffix;
+				ok = true;
+			} else if (expr == "item.lifetime_alpha") {
+				char buf[32];
+				UID_ProfileCountInc(UID_PROF_CNT_SNPRINTF);
+				std::snprintf(buf, sizeof(buf), "%.6g", static_cast<double>(UID_EvalItemLifetimeAlpha(doc, nodeId)));
+				resolved = std::string(buf) + suffix;
+				ok = true;
+			}
+		}
+		if (!ok) {
+			continue;
+		}
+		const char *want = resolved.c_str();
+		const char *cur = node->properties.GetCStr(kv.first.c_str(), "");
+		if (cur && std::strcmp(cur, want) == 0) {
+			continue;
+		}
+		const std::string oldVal = cur ? cur : "";
+		node->properties.Set(kv.first.c_str(), want);
+		MirrorLeafImageProps(node, kv.first, resolved);
+		MarkDirtyAfterPropChange(
+			doc,
+			nodeId,
+			kv.first,
+			oldVal.c_str(),
+			want,
+			kLayoutProps,
+			sizeof(kLayoutProps) / sizeof(kLayoutProps[0]),
+			false
+		);
+	}
+}
+
+static void SyncForeachItemText(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	uid_node_def_t      *node,
+	uid_node_state_t    *st,
+	const uid_backend_t *backend
+)
+{
+	if (!doc || !node || !st || !backend || !node->foreachGenerated) {
+		return;
+	}
+	if (node->text.find("{item.") == std::string::npos) {
+		return;
+	}
+	uid_bool_lookup_ctx_t ctx;
+	FillBoolLookupCtx(&ctx, doc, nodeId, backend);
+	if (!ctx.item) {
+		SetRuntimeIfChanged(doc, nodeId, st, node->kind, std::string());
+		return;
+	}
+
+	const char *displayMode = "label";
+	if (node->foreachScopeId >= 0 && static_cast<size_t>(node->foreachScopeId) < doc->nodes.size()) {
+		if (doc->nodes[static_cast<size_t>(node->foreachScopeId)].collectionDisplay == "value") {
+			displayMode = "value";
+		}
+	}
+
+	std::string out;
+	out.reserve(node->text.size());
+	for (size_t i = 0; i < node->text.size();) {
+		if (node->text[i] != '{') {
+			out.push_back(node->text[i++]);
+			continue;
+		}
+		const size_t end = node->text.find('}', i + 1);
+		if (end == std::string::npos) {
+			out.push_back(node->text[i++]);
+			continue;
+		}
+		const std::string key = node->text.substr(i + 1, end - i - 1);
+		if (key == "item.index") {
+			out += std::to_string(ctx.itemIndex);
+		} else if (key == "item.count") {
+			out += std::to_string(ctx.itemCount);
+		} else if (key == "item.selected") {
+			out += (ctx.itemIndex == ctx.selectedIndex) ? "true" : "false";
+		} else if (ctx.item && key == "item.key") {
+			out += ctx.item->key;
+		} else if (ctx.item && key == "item.value") {
+			out += ctx.item->value;
+		} else if (ctx.item && key == "item.label") {
+			out += ctx.item->label;
+		} else if (ctx.item && key == "item.display") {
+			out += (std::strcmp(displayMode, "value") == 0) ? ctx.item->value : ctx.item->label;
+		} else if (ctx.item && key.rfind("item.field.", 0) == 0) {
+			const std::string fname = key.substr(11);
+			auto it = ctx.item->fields.find(fname);
+			if (it != ctx.item->fields.end()) {
+				out += it->second;
+			}
+		} else {
+			out += node->text.substr(i, end - i + 1);
+		}
+		i = end + 1;
+	}
+
+	if (st->runtimeValue.hasValue && st->runtimeValue.stringValue == out) {
+		return;
+	}
+	st->runtimeValue.hasValue = true;
+	st->runtimeValue.stringValue = out;
+	uid_dirty_flags_t dirty = UID_DIRTY_PAINT;
+	if (TextSizeMayChange(node->kind) && TextIsContentSized(*node)) {
+		dirty = static_cast<uid_dirty_flags_t>(dirty | UID_DIRTY_LAYOUT);
+	}
+	UID_MarkDirty(doc, dirty, nodeId, "foreach_text");
+}
+
+static void SyncCvarBoundProps(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	uid_node_def_t      *node,
+	const uid_backend_t *backend
+)
+{
+	if (!doc || !node || !backend) {
+		return;
+	}
+	uid_node_state_t *st = nullptr;
+	if (nodeId >= 0 && static_cast<size_t>(nodeId) < doc->states.size()) {
+		st = &doc->states[static_cast<size_t>(nodeId)];
+	}
+	/* Stage 6b: combined modCount stamp — skip when no bound cvar changed. */
+	unsigned propsStamp = 0;
+	bool     propsStampOk = false;
+	if (st && backend->cvarNumber && !node->cvarBoundProps.empty()) {
+		unsigned stamp = 0;
+		bool ok = true;
+		for (const auto &kv : node->cvarBoundProps) {
+			std::string cvarName;
+			if (!UID_ParseExactCvarBraceBinding(kv.second, &cvarName)) {
+				ok = false;
+				break;
+			}
+			double unused = 0.0;
+			unsigned mod = 0;
+			if (!backend->cvarNumber(cvarName.c_str(), &unused, &mod)) {
+				ok = false;
+				break;
+			}
+			stamp = stamp * 131u + (mod + 1u);
+		}
+		if (ok) {
+			propsStampOk = true;
+			propsStamp = stamp;
+			if (st->cvarPropsModStamp == stamp) {
+				return;
+			}
+		}
+	}
+	static const char *kLayoutProps[] = {
+		"width", "height", "gap", "margin", "padding", "font-size",
+		"src" /* Added in Omaha: leaf <image> intrinsic size depends on src */
+	};
+	for (const auto &kv : node->cvarBoundProps) {
+		std::string cvarName;
+		if (!UID_ParseExactCvarBraceBinding(kv.second, &cvarName)) {
+			continue;
+		}
+		std::string val;
+		if (!ReadCvarString(backend, cvarName.c_str(), &val) || val.empty()) {
+			const char *authored = kv.second.c_str();
+			const char *cur = node->properties.GetCStr(kv.first.c_str(), "");
+			if (cur && std::strcmp(cur, authored) == 0) {
+				continue;
+			}
+			const std::string oldVal = cur ? cur : "";
+			node->properties.Set(kv.first.c_str(), authored);
+			MirrorLeafImageProps(node, kv.first, authored);
+			MarkDirtyAfterPropChange(
+				doc,
+				nodeId,
+				kv.first,
+				oldVal.c_str(),
+				authored,
+				kLayoutProps,
+				sizeof(kLayoutProps) / sizeof(kLayoutProps[0]),
+				false
+			);
+			continue;
+		}
+		const char *want = val.c_str();
+		const char *cur = node->properties.GetCStr(kv.first.c_str(), "");
+		if (cur && std::strcmp(cur, want) == 0) {
+			continue;
+		}
+		const std::string oldVal = cur ? cur : "";
+		node->properties.Set(kv.first.c_str(), want);
+		MirrorLeafImageProps(node, kv.first, val);
+		MarkDirtyAfterPropChange(
+			doc,
+			nodeId,
+			kv.first,
+			oldVal.c_str(),
+			want,
+			kLayoutProps,
+			sizeof(kLayoutProps) / sizeof(kLayoutProps[0]),
+			false
+		);
+	}
+	if (st && propsStampOk) {
+		st->cvarPropsModStamp = propsStamp;
+	}
+}
+
+/* Added in Omaha: max joined label text so huge servers cannot blow buffers. */
+constexpr size_t kJoinMaxChars = 2048;
+
+static bool JoinReadBareId(const char *s, size_t len, size_t *pos, std::string *out)
+{
+	if (!s || !pos || !out) {
+		return false;
+	}
+	while (*pos < len && std::isspace(static_cast<unsigned char>(s[*pos]))) {
+		++(*pos);
+	}
+	if (*pos >= len) {
+		return false;
+	}
+	const size_t start = *pos;
+	unsigned char c = static_cast<unsigned char>(s[*pos]);
+	if (!(std::isalnum(c) || c == '_' || c == '-')) {
+		return false;
+	}
+	++(*pos);
+	while (*pos < len) {
+		c = static_cast<unsigned char>(s[*pos]);
+		if (std::isalnum(c) || c == '_' || c == '-') {
+			++(*pos);
+		} else {
+			break;
+		}
+	}
+	*out = std::string(s + start, *pos - start);
+	return !out->empty();
+}
+
+static bool JoinReadQuoted(const char *s, size_t len, size_t *pos, std::string *out)
+{
+	if (!s || !pos || !out) {
+		return false;
+	}
+	while (*pos < len && std::isspace(static_cast<unsigned char>(s[*pos]))) {
+		++(*pos);
+	}
+	if (*pos >= len) {
+		return false;
+	}
+	const char quote = s[*pos];
+	if (quote != '"' && quote != '\'') {
+		return false;
+	}
+	++(*pos);
+	std::string acc;
+	while (*pos < len) {
+		const char c = s[(*pos)++];
+		if (c == quote) {
+			*out = acc;
+			return true;
+		}
+		if (c == '\\' && *pos < len) {
+			acc.push_back(s[(*pos)++]);
+		} else {
+			acc.push_back(c);
+		}
+	}
+	return false;
+}
+
+static bool JoinExpectChar(const char *s, size_t len, size_t *pos, char want)
+{
+	if (!s || !pos) {
+		return false;
+	}
+	while (*pos < len && std::isspace(static_cast<unsigned char>(s[*pos]))) {
+		++(*pos);
+	}
+	if (*pos >= len || s[*pos] != want) {
+		return false;
+	}
+	++(*pos);
+	return true;
+}
+
+static std::string JoinFieldValue(const uid_collection_entry_t &item, const std::string &field)
+{
+	if (field == "label") {
+		return item.label;
+	}
+	if (field == "value" || field == "key") {
+		return field == "key" ? item.key : item.value;
+	}
+	auto it = item.fields.find(field);
+	if (it != item.fields.end()) {
+		return it->second;
+	}
+	return std::string();
+}
+
+/*
+ * Added in Omaha: join(source, field, "sep"[, boolFilter]) → string for label braces.
+ * Filter is evaluated per row with item.field.* bound to that row.
+ */
+static bool EvalJoinCall(
+	uid_document_t *doc,
+	uid_node_id_t nodeId,
+	const std::string &call,
+	const uid_backend_t *backend,
+	std::string *out
+)
+{
+	if (!doc || !backend || !out) {
+		return false;
+	}
+	out->clear();
+	const char *s = call.c_str();
+	const size_t len = call.size();
+	size_t pos = 0;
+	while (pos < len && std::isspace(static_cast<unsigned char>(s[pos]))) {
+		++pos;
+	}
+	if (len - pos < 5 || std::strncmp(s + pos, "join", 4) != 0) {
+		return false;
+	}
+	pos += 4;
+	if (!JoinExpectChar(s, len, &pos, '(')) {
+		return false;
+	}
+
+	std::string sourceId;
+	std::string fieldId;
+	std::string sep;
+	if (!JoinReadBareId(s, len, &pos, &sourceId) || !JoinExpectChar(s, len, &pos, ',') ||
+	    !JoinReadBareId(s, len, &pos, &fieldId) || !JoinExpectChar(s, len, &pos, ',') ||
+	    !JoinReadQuoted(s, len, &pos, &sep)) {
+		return false;
+	}
+
+	std::string filter;
+	while (pos < len && std::isspace(static_cast<unsigned char>(s[pos]))) {
+		++pos;
+	}
+	if (pos < len && s[pos] == ',') {
+		++pos;
+		while (pos < len && std::isspace(static_cast<unsigned char>(s[pos]))) {
+			++pos;
+		}
+		/* Remainder until the matching ')' at depth 0. */
+		int depth = 0;
+		const size_t filterStart = pos;
+		while (pos < len) {
+			const char c = s[pos];
+			if (c == '(') {
+				++depth;
+			} else if (c == ')') {
+				if (depth == 0) {
+					break;
+				}
+				--depth;
+			} else if ((c == '"' || c == '\'') && depth >= 0) {
+				const char q = c;
+				++pos;
+				while (pos < len && s[pos] != q) {
+					if (s[pos] == '\\' && pos + 1 < len) {
+						pos += 2;
+					} else {
+						++pos;
+					}
+				}
+				if (pos < len) {
+					++pos;
+				}
+				continue;
+			}
+			++pos;
+		}
+		filter = std::string(s + filterStart, pos - filterStart);
+		TrimInPlace(&filter);
+	}
+	if (!JoinExpectChar(s, len, &pos, ')')) {
+		return false;
+	}
+	while (pos < len && std::isspace(static_cast<unsigned char>(s[pos]))) {
+		++pos;
+	}
+	if (pos != len) {
+		return false;
+	}
+
+	std::vector<uid_collection_entry_t> items;
+	if (!UID_FetchCollectionEntries(doc, backend, sourceId.c_str(), &items)) {
+		return false;
+	}
+
+	uid_bool_lookup_ctx_t ctx;
+	FillBoolLookupCtx(&ctx, doc, nodeId, backend);
+	ctx.itemCount = static_cast<int>(items.size());
+	ctx.selectedIndex = -1;
+
+	std::string joined;
+	joined.reserve(256);
+	for (size_t i = 0; i < items.size(); ++i) {
+		ctx.item = &items[i];
+		ctx.itemIndex = static_cast<int>(i);
+		if (!filter.empty()) {
+			bool keep = false;
+			std::string diag;
+			if (!UID_EvalBool(filter.c_str(), &ctx, nullptr, &keep, &diag) || !keep) {
+				continue;
+			}
+		}
+		const std::string piece = JoinFieldValue(items[i], fieldId);
+		if (piece.empty()) {
+			continue;
+		}
+		if (!joined.empty()) {
+			joined += sep;
+		}
+		joined += piece;
+		if (joined.size() >= kJoinMaxChars) {
+			joined.resize(kJoinMaxChars);
+			break;
+		}
+	}
+	*out = joined;
+	return true;
+}
+
+/* Added in Omaha: label braces may be join(...) strings or numeric embeds. */
+static bool ResolveAllRuntimeLabelBraceExprs(
+	uid_document_t *doc,
+	uid_node_id_t nodeId,
+	const std::string &authored,
+	const uid_backend_t *backend,
+	std::string *out
+)
+{
+	if (!out) {
+		return false;
+	}
+	if (authored.find('{') == std::string::npos) {
+		return false;
+	}
+
+	std::string cur = authored;
+	for (int guard = 0; guard < 64; ++guard) {
+		const size_t start = cur.find('{');
+		if (start == std::string::npos) {
+			*out = cur;
+			return true;
+		}
+		const size_t end = cur.find('}', start + 1);
+		if (end == std::string::npos) {
+			return false;
+		}
+		std::string expr = cur.substr(start + 1, end - start - 1);
+		TrimInPlace(&expr);
+
+		std::string replacement;
+		if (expr.size() >= 5 && expr.compare(0, 4, "join") == 0 &&
+		    (expr.size() == 4 || expr[4] == '(' || std::isspace(static_cast<unsigned char>(expr[4])))) {
+			if (!EvalJoinCall(doc, nodeId, expr, backend, &replacement)) {
+				return false;
+			}
+		} else {
+			double value = 0.0;
+			if (!EvalRuntimeNumericExprImpl(doc, nodeId, expr, backend, &value)) {
+				return false;
+			}
+			const size_t after = end + 1;
+			size_t       tokenEnd = after;
+			while (tokenEnd < cur.size() && !std::isspace(static_cast<unsigned char>(cur[tokenEnd]))) {
+				++tokenEnd;
+			}
+			const std::string unitSuffix = cur.substr(after, tokenEnd - after);
+			replacement = FormatEvaluatedNumber(value) + unitSuffix;
+			cur.replace(start, tokenEnd - start, replacement);
+			continue;
+		}
+		cur.replace(start, end - start + 1, replacement);
+	}
+	return false;
+}
+
+/* Added in Omaha: evaluate {expr} embeds in label text (e.g. floor(cvar…/60) for MM:SS). */
+static void SyncInterpolatedLabelText(
+	uid_document_t *doc,
+	uid_node_id_t id,
+	uid_node_def_t *node,
+	uid_node_state_t *st,
+	const uid_backend_t *backend
+)
+{
+	if (!doc || !node || !st || !backend) {
+		return;
+	}
+	if (node->text.empty() || node->text.find('{') == std::string::npos) {
+		return;
+	}
+	/* Exact {cvar.name} passthrough — keep as string, not numeric format. */
+	std::string cvarName;
+	if (UID_ParseExactCvarBraceBinding(node->text, &cvarName)) {
+		if (backend->cvarNumber) {
+			double unused = 0.0;
+			unsigned mod = 0;
+			if (backend->cvarNumber(cvarName.c_str(), &unused, &mod) && st->labelCvarModCount == mod &&
+			    st->runtimeValue.hasValue) {
+				return;
+			}
+			st->labelCvarModCount = mod;
+		}
+		std::string value;
+		if (!ReadCvarString(backend, cvarName.c_str(), &value)) {
+			value.clear();
+		}
+		SetRuntimeIfChanged(doc, id, st, node->kind, value);
+		return;
+	}
+	/* Foreach item.* text is handled by SyncForeachItemText. */
+	if (node->foreachGenerated && node->text.find("{item.") != std::string::npos &&
+	    node->text.find("cvar.") == std::string::npos &&
+	    node->text.find("join(") == std::string::npos) {
+		return;
+	}
+	std::string resolved;
+	if (!ResolveAllRuntimeLabelBraceExprs(doc, id, node->text, backend, &resolved)) {
+		return;
+	}
+	SetRuntimeIfChanged(doc, id, st, node->kind, resolved);
+}
+
+} // namespace
+
+bool UID_EvalRuntimeNumericExpr(
+	uid_document_t      *doc,
+	uid_node_id_t        nodeId,
+	const std::string   &expr,
+	const uid_backend_t *backend,
+	double              *out
+)
+{
+	return EvalRuntimeNumericExprImpl(doc, nodeId, expr, backend, out);
+}
+
+uid_result_t UID_TryCommitKeybindCapture(
+	uid_document_t *doc,
+	uid_node_id_t nodeId,
+	int capturedKey,
+	const uid_backend_t *backend
+)
+{
+	return TryCommitKeybindCaptureImpl(doc, nodeId, capturedKey, backend);
+}
+
+uid_result_t UID_CommitKeybindFromModalCvars(uid_document_t *doc, const uid_backend_t *backend)
+{
+	return CommitKeybindFromModalCvarsImpl(doc, backend);
+}
+
+static void TrimCvarBraceBinding(std::string *s)
+{
+	if (!s) {
+		return;
+	}
+	size_t b = 0;
+	while (b < s->size() && std::isspace(static_cast<unsigned char>((*s)[b]))) {
+		++b;
+	}
+	size_t e = s->size();
+	while (e > b && std::isspace(static_cast<unsigned char>((*s)[e - 1]))) {
+		--e;
+	}
+	*s = s->substr(b, e - b);
+}
+
+bool UID_ParseExactCvarBraceBinding(const std::string &value, std::string *cvarNameOut)
+{
+	if (!cvarNameOut) {
+		return false;
+	}
+	cvarNameOut->clear();
+	std::string trimmed = value;
+	TrimCvarBraceBinding(&trimmed);
+	if (trimmed.size() < 3 || trimmed.front() != '{' || trimmed.back() != '}') {
+		return false;
+	}
+	std::string inner = trimmed.substr(1, trimmed.size() - 2);
+	TrimCvarBraceBinding(&inner);
+	if (inner.size() < 6 || inner.compare(0, 4, "cvar") != 0) {
+		return false;
+	}
+	if (inner[4] != ':' && inner[4] != '.') {
+		return false;
+	}
+	std::string name = inner.substr(5);
+	TrimCvarBraceBinding(&name);
+	if (name.empty()) {
+		return false;
+	}
+	/*
+	 * Fixed in Omaha: only exact {cvar.name} / {cvar:name} — not style ternaries
+	 * that begin with cvar. (e.g. "{cvar.a != cvar.b ? …}"). Those must stay on
+	 * the styleExprs path; treating them as cvar binds made SyncCvarBoundProps
+	 * restore the unresolved ternary after SyncBoundStyleExprs.
+	 */
+	for (char ch : name) {
+		const unsigned char c = static_cast<unsigned char>(ch);
+		if (std::isalnum(c) || ch == '_' || ch == '-' || ch == '.') {
+			continue;
+		}
+		return false;
+	}
+	*cvarNameOut = name;
+	return true;
+}
+
+void UID_RegisterCvarBoundProps(uid_node_def_t *node)
+{
+	if (!node) {
+		return;
+	}
+	node->bindingFlagsValid = false;
+	static const char *kProps[] = {
+		"width", "height", "gap", "margin", "padding", "font-size", "rotation", "rotation-origin",
+		"shape-rotation", /* Added in Omaha: bindable path spin (competitive compass pain wedge) */
+		"translate-x", "translate-y",
+		"opacity", "background-image", "mask-image", "color", "fill", "left", "top", "right", "bottom",
+		"background-scale",
+		/* Added in Omaha: leaf <image> */
+		"src", "fit", "scale"
+	};
+	node->cvarBoundProps.clear();
+	node->exprBoundProps.clear();
+	for (const char *prop : kProps) {
+		std::string value;
+		if (!node->properties.Get(prop, &value) || value.empty()) {
+			continue;
+		}
+		if (std::strcmp(prop, "background-image") == 0 || std::strcmp(prop, "mask-image") == 0 ||
+			std::strcmp(prop, "src") == 0) {
+			std::string cvarName;
+			if (UID_ParseExactCvarBraceBinding(value, &cvarName)) {
+				node->cvarBoundProps[prop] = value;
+			} else if (value.find("item.field.") != std::string::npos) {
+				node->exprBoundProps[prop] = value;
+			} else if (value.find("item.lifetime_alpha") != std::string::npos) {
+				node->exprBoundProps[prop] = value;
+			} else if (IsExprBoundPropValue(value)) {
+				node->exprBoundProps[prop] = value;
+			}
+			continue;
+		}
+		std::string cvarName;
+		if (UID_ParseExactCvarBraceBinding(value, &cvarName)) {
+			node->cvarBoundProps[prop] = value;
+		} else if (value.find("item.field.") != std::string::npos) {
+			/* Added in Omaha: keep authored item.field placeholders (incl. ternaries)
+			 * so SyncExprBoundProps can refresh them after same-key collection updates. */
+			node->exprBoundProps[prop] = value;
+		} else if (value.find("item.lifetime_alpha") != std::string::npos) {
+			node->exprBoundProps[prop] = value;
+		} else if (IsExprBoundPropValue(value)) {
+			node->exprBoundProps[prop] = value;
+		}
+	}
+}
+
+bool UID_ParseCvarBind(const char *bind, std::string *cvarNameOut)
+{
+	if (!bind || !cvarNameOut) {
+		return false;
+	}
+
+	const char *p = bind;
+	while (*p && std::isspace(static_cast<unsigned char>(*p))) {
+		++p;
+	}
+	if (!*p) {
+		return false;
+	}
+
+	/* Canonical: cvar:name */
+	if (std::strncmp(p, "cvar:", 5) == 0) {
+		std::string name(p + 5);
+		TrimInPlace(&name);
+		if (name.empty()) {
+			return false;
+		}
+		*cvarNameOut = name;
+		return true;
+	}
+
+	/* Compat: cvar(name) */
+	if (std::strncmp(p, "cvar(", 5) == 0) {
+		p += 5;
+		const char *close = std::strchr(p, ')');
+		if (!close || close == p) {
+			return false;
+		}
+		std::string name(p, close);
+		TrimInPlace(&name);
+		if (name.empty()) {
+			return false;
+		}
+		*cvarNameOut = name;
+		return true;
+	}
+
+	return false;
+}
+
+bool UID_ParseItemFieldBind(const char *bind, std::string *fieldNameOut)
+{
+	if (!bind || !fieldNameOut) {
+		return false;
+	}
+
+	const char *p = bind;
+	while (*p && std::isspace(static_cast<unsigned char>(*p))) {
+		++p;
+	}
+	if (!*p) {
+		return false;
+	}
+
+	/* Canonical: item.field:name */
+	if (std::strncmp(p, "item.field:", 11) == 0) {
+		std::string name(p + 11);
+		TrimInPlace(&name);
+		if (name.empty()) {
+			return false;
+		}
+		*fieldNameOut = name;
+		return true;
+	}
+
+	/* Compat: item.field.name (path style) */
+	if (std::strncmp(p, "item.field.", 11) == 0) {
+		std::string name(p + 11);
+		TrimInPlace(&name);
+		if (name.empty() || name.find('{') != std::string::npos) {
+			return false;
+		}
+		*fieldNameOut = name;
+		return true;
+	}
+
+	return false;
+}
+
+/* Added in Omaha: Phase 4.4 — cvar dependency index (skip unchanged subtrees). */
+static int g_bindDeps = 1;
+static int g_bindDepsVerify = 0;
+/* Added in Omaha: Phase 4.4 — heading/tape cvars that only drive translate-x/y. */
+static int s_bindTxChanged = 0;
+static int s_bindTxOnly = 0;
+/* Fixed in OpenMoH Arena: collection scopes whose rows or selection changed in the last mark pass. */
+static int s_bindCollectionChanged = 0;
+
+void UID_SetBindDeps(int enabled)
+{
+	g_bindDeps = enabled ? 1 : 0;
+}
+
+int UID_BindDepsEnabled(void)
+{
+	return g_bindDeps;
+}
+
+void UID_SetBindDepsVerify(int enabled)
+{
+	g_bindDepsVerify = enabled ? 1 : 0;
+}
+
+static void BindDepsProbeExprs(uid_node_def_t *node)
+{
+	if (!node) {
+		return;
+	}
+	if (!node->visibleExprProbed) {
+		node->visibleExprProbed = true;
+		if (node->visibleExpr.empty()) {
+			std::string vis;
+			if (node->properties.Get("visible", &vis)) {
+				std::string inner;
+				if (UID_ParseBraceBoolExpr(vis.c_str(), &inner)) {
+					node->visibleExpr = inner;
+					node->bindingFlagsValid = false;
+				}
+			}
+		}
+	}
+	if (!node->enabledExprProbed) {
+		node->enabledExprProbed = true;
+		if (node->enabledExpr.empty()) {
+			std::string en;
+			if (node->properties.Get("enabled", &en)) {
+				std::string inner;
+				if (UID_ParseBraceBoolExpr(en.c_str(), &inner)) {
+					node->enabledExpr = inner;
+					node->bindingFlagsValid = false;
+				}
+			}
+		}
+	}
+}
+
+static void BindDepsCollectNodeCvars(const uid_node_def_t *node, std::vector<std::string> *names)
+{
+	if (!node || !names) {
+		return;
+	}
+	UID_ExprCollectCvarNames(node->visibleExpr, names);
+	UID_ExprCollectCvarNames(node->enabledExpr, names);
+	UID_ExprCollectCvarNames(node->visibleIf, names);
+	UID_ExprCollectCvarNames(node->enabledIf, names);
+	for (const auto &kv : node->styleExprs) {
+		UID_ExprCollectCvarNames(kv.second, names);
+	}
+	for (const auto &kv : node->cvarBoundProps) {
+		if (IsTranslateProp(kv.first)) {
+			continue;
+		}
+		std::string cn;
+		if (UID_ParseExactCvarBraceBinding(kv.second, &cn)) {
+			names->push_back(cn);
+		} else {
+			UID_ExprCollectCvarNames(kv.second, names);
+		}
+	}
+	for (const auto &kv : node->exprBoundProps) {
+		if (IsTranslateProp(kv.first)) {
+			continue;
+		}
+		UID_ExprCollectCvarNames(kv.second, names);
+	}
+	{
+		std::string cn;
+		if (UID_ParseCvarBind(node->bind.c_str(), &cn)) {
+			names->push_back(cn);
+		}
+	}
+	UID_ExprCollectCvarNames(node->text, names);
+	const char *tc = node->properties.GetCStr("text-cvar", nullptr);
+	if (tc && tc[0]) {
+		names->emplace_back(tc);
+	}
+}
+
+static void BindDepsCollectTranslateCvars(const uid_node_def_t *node, std::vector<std::string> *names)
+{
+	if (!node || !names) {
+		return;
+	}
+	for (const auto &kv : node->cvarBoundProps) {
+		if (!IsTranslateProp(kv.first)) {
+			continue;
+		}
+		std::string cn;
+		if (UID_ParseExactCvarBraceBinding(kv.second, &cn)) {
+			names->push_back(cn);
+		} else {
+			UID_ExprCollectCvarNames(kv.second, names);
+		}
+	}
+	for (const auto &kv : node->exprBoundProps) {
+		if (!IsTranslateProp(kv.first)) {
+			continue;
+		}
+		UID_ExprCollectCvarNames(kv.second, names);
+	}
+}
+
+static void BindDepsMarkAncestors(
+	uid_document_t *doc,
+	std::vector<unsigned char> *touched,
+	uid_node_id_t id
+)
+{
+	if (!doc || !touched) {
+		return;
+	}
+	while (id >= 0 && static_cast<size_t>(id) < touched->size()) {
+		unsigned char &flag = (*touched)[static_cast<size_t>(id)];
+		if (flag) {
+			break;
+		}
+		flag = 1;
+		if (static_cast<size_t>(id) >= doc->parentOf.size()) {
+			break;
+		}
+		id = doc->parentOf[static_cast<size_t>(id)];
+	}
+}
+
+static void BindDepsMarkDescendants(
+	uid_document_t *doc,
+	std::vector<unsigned char> *touched,
+	uid_node_id_t id
+)
+{
+	if (!doc || !touched || id < 0 || static_cast<size_t>(id) >= doc->nodes.size()) {
+		return;
+	}
+	std::vector<uid_node_id_t> stack;
+	stack.push_back(id);
+	while (!stack.empty()) {
+		const uid_node_id_t cur = stack.back();
+		stack.pop_back();
+		if (cur < 0 || static_cast<size_t>(cur) >= touched->size()) {
+			continue;
+		}
+		(*touched)[static_cast<size_t>(cur)] = 1;
+		if (static_cast<size_t>(cur) >= doc->nodes.size()) {
+			continue;
+		}
+		for (uid_node_id_t c : doc->nodes[static_cast<size_t>(cur)].children) {
+			stack.push_back(c);
+		}
+	}
+}
+
+static void UID_RebuildBindDeps(uid_document_t *doc, const uid_backend_t *backend)
+{
+	if (!doc) {
+		return;
+	}
+	std::unordered_map<std::string, unsigned> prevMod;
+	prevMod.reserve(doc->depCvars.size() * 2 + 1);
+	for (size_t i = 0; i < doc->depCvars.size() && i < doc->depLastMod.size(); ++i) {
+		prevMod.emplace(doc->depCvars[i], doc->depLastMod[i]);
+	}
+	doc->depCvars.clear();
+	doc->depNodes.clear();
+	doc->depLastMod.clear();
+	doc->depCvarPtrs.clear();
+	doc->depAffectsVisible.clear();
+	doc->depTranslateOnly.clear();
+	doc->impureNodes.clear();
+	if (doc->parentOf.size() != doc->nodes.size()) {
+		UID_RebuildParentMap(doc);
+	}
+
+	std::unordered_map<std::string, size_t> index;
+	std::vector<std::string> names;
+	names.reserve(8);
+	for (size_t i = 0; i < doc->nodes.size(); ++i) {
+		uid_node_def_t *node = &doc->nodes[i];
+		BindDepsProbeExprs(node);
+		const uid_node_id_t id = static_cast<uid_node_id_t>(i);
+		if (node->foreachGenerated || !NodeBindBodyIsCvarPure(node)) {
+			doc->impureNodes.push_back(id);
+		}
+		names.clear();
+		BindDepsCollectNodeCvars(node, &names);
+		auto addDep = [&](const std::string &name, int translateOnly) {
+			if (name.empty()) {
+				return;
+			}
+			auto it = index.find(name);
+			if (it == index.end()) {
+				const size_t slot = doc->depCvars.size();
+				index.emplace(name, slot);
+				doc->depCvars.push_back(name);
+				doc->depNodes.emplace_back();
+				doc->depCvarPtrs.push_back(
+					(backend && backend->cvarFind) ? backend->cvarFind(name.c_str()) : nullptr
+				);
+				doc->depAffectsVisible.push_back(0);
+				doc->depTranslateOnly.push_back(translateOnly ? 1 : 0);
+				doc->depNodes.back().push_back(id);
+			} else {
+				if (!translateOnly && it->second < doc->depTranslateOnly.size()) {
+					doc->depTranslateOnly[it->second] = 0;
+				}
+				std::vector<uid_node_id_t> &list = doc->depNodes[it->second];
+				if (list.empty() || list.back() != id) {
+					list.push_back(id);
+				}
+			}
+		};
+		for (const std::string &name : names) {
+			addDep(name, 0);
+		}
+		{
+			std::vector<std::string> txNames;
+			BindDepsCollectTranslateCvars(node, &txNames);
+			for (const std::string &name : txNames) {
+				addDep(name, 1);
+			}
+		}
+		std::vector<std::string> visNames;
+		UID_ExprCollectCvarNames(node->visibleExpr, &visNames);
+		UID_ExprCollectCvarNames(node->visibleIf, &visNames);
+		{
+			const char *visProp = node->properties.GetCStr("visible", nullptr);
+			if (visProp && visProp[0] == '{') {
+				UID_ExprCollectCvarNames(visProp, &visNames);
+			}
+		}
+		for (const std::string &name : visNames) {
+			const auto it = index.find(name);
+			if (it != index.end() && it->second < doc->depAffectsVisible.size()) {
+				doc->depAffectsVisible[it->second] = 1;
+			}
+		}
+	}
+	doc->depLastMod.resize(doc->depCvars.size(), 0u);
+	for (size_t i = 0; i < doc->depCvars.size(); ++i) {
+		const auto it = prevMod.find(doc->depCvars[i]);
+		if (it != prevMod.end()) {
+			doc->depLastMod[i] = it->second;
+		} else if (backend && backend->cvarModCount) {
+			doc->depLastMod[i] = backend->cvarModCount(doc->depCvars[i].c_str());
+		}
+	}
+	if (doc->depAffectsVisible.size() != doc->depCvars.size()) {
+		doc->depAffectsVisible.resize(doc->depCvars.size(), 0);
+	}
+	if (doc->depTranslateOnly.size() != doc->depCvars.size()) {
+		doc->depTranslateOnly.resize(doc->depCvars.size(), 0);
+	}
+	if (doc->depCvarPtrs.size() != doc->depCvars.size()) {
+		doc->depCvarPtrs.resize(doc->depCvars.size(), nullptr);
+	}
+	doc->bindDepsStale = false;
+	doc->bindDepsWarm = false;
+	doc->bindDepsNodeCount = doc->nodes.size();
+}
+
+static int BindDepsMarkTouched(
+	uid_document_t *doc,
+	const uid_backend_t *backend,
+	std::vector<unsigned char> *touched,
+	int commitMods
+)
+{
+	if (!doc || !touched) {
+		return 0;
+	}
+	touched->assign(doc->nodes.size(), 0);
+	if (doc->parentOf.size() != doc->nodes.size()) {
+		UID_RebuildParentMap(doc);
+	}
+	int nChanged = 0;
+	s_bindTxChanged = 0;
+	s_bindTxOnly = 0;
+	s_bindCollectionChanged = 0;
+	if (!doc->bindDepsWarm) {
+		touched->assign(doc->nodes.size(), 1);
+	}
+	if (backend && (backend->cvarModCountHandle || backend->cvarModCount)) {
+		const size_t n = doc->depCvars.size() < doc->depNodes.size() ? doc->depCvars.size() : doc->depNodes.size();
+		const size_t nMod = n < doc->depLastMod.size() ? n : doc->depLastMod.size();
+		if (doc->depCvarPtrs.size() != doc->depCvars.size()) {
+			doc->depCvarPtrs.resize(doc->depCvars.size(), nullptr);
+		}
+		for (size_t i = 0; i < nMod; ++i) {
+			unsigned now = 0;
+			if (backend->cvarModCountHandle) {
+				if (!doc->depCvarPtrs[i] && backend->cvarFind) {
+					doc->depCvarPtrs[i] = backend->cvarFind(doc->depCvars[i].c_str());
+				}
+				now = backend->cvarModCountHandle(doc->depCvarPtrs[i]);
+			} else {
+				now = backend->cvarModCount(doc->depCvars[i].c_str());
+			}
+			if (now == doc->depLastMod[i]) {
+				continue;
+			}
+			if (commitMods) {
+				doc->depLastMod[i] = now;
+			}
+			++nChanged;
+			if (doc->bindDepsWarm) {
+				const int vis = (i < doc->depAffectsVisible.size() && doc->depAffectsVisible[i]);
+				for (uid_node_id_t id : doc->depNodes[i]) {
+					BindDepsMarkAncestors(doc, touched, id);
+					if (vis) {
+						BindDepsMarkDescendants(doc, touched, id);
+					}
+				}
+			}
+		}
+	}
+	const size_t nState = doc->states.size() < touched->size() ? doc->states.size() : touched->size();
+	for (size_t i = 0; i < nState; ++i) {
+		uid_node_state_t *st = &doc->states[i];
+		if (doc->bindDepsWarm && NodeBindInteractionDirty(st)) {
+			BindDepsMarkAncestors(doc, touched, static_cast<uid_node_id_t>(i));
+		}
+		if (doc->nodes[i].collectionSource.empty()) {
+			continue;
+		}
+		if (st->collectionRevision == st->bindDepsSeenCollectionRev &&
+			st->collectionSelectedIndex == st->bindDepsSeenCollectionSel) {
+			continue;
+		}
+		if (commitMods) {
+			st->bindDepsSeenCollectionRev = st->collectionRevision;
+			st->bindDepsSeenCollectionSel = st->collectionSelectedIndex;
+		}
+		++nChanged;
+		++s_bindCollectionChanged;
+		if (!doc->bindDepsWarm) {
+			continue;
+		}
+		for (size_t j = 0; j < doc->nodes.size(); ++j) {
+			if (doc->nodes[j].foreachGenerated && doc->nodes[j].foreachScopeId == static_cast<uid_node_id_t>(i)) {
+				BindDepsMarkAncestors(doc, touched, static_cast<uid_node_id_t>(j));
+			}
+		}
+	}
+	s_bindTxOnly = (s_bindTxChanged > 0 && nChanged == 0) ? 1 : 0;
+	return nChanged;
+}
+
+void UID_SyncBindings(uid_document_t *doc, const uid_backend_t *backend)
+{
+	if (!doc || !backend) {
+		return;
+	}
+
+	++doc->syncFrameCounter;
+
+	g_cvarMemo.clear();
+	g_cvarMemoActive = UID_OptEnabled(UID_OPT_CVAR_MEMO) != 0;
+
+	UID_SyncModals(doc, backend);
+
+	auto ensureBindingFlags = [](uid_node_def_t *node) {
+		if (!node || node->bindingFlagsValid) {
+			return;
+		}
+		unsigned flags = 0;
+		if (!node->visibleExpr.empty()) {
+			flags |= UID_BIND_F_VISIBLE_EXPR;
+		}
+		if (!node->enabledExpr.empty()) {
+			flags |= UID_BIND_F_ENABLED_EXPR;
+		}
+		if (!node->styleExprs.empty()) {
+			flags |= UID_BIND_F_STYLE;
+		}
+		if (!node->cvarBoundProps.empty()) {
+			flags |= UID_BIND_F_CVAR_PROPS;
+		}
+		if (!node->exprBoundProps.empty()) {
+			flags |= UID_BIND_F_EXPR_PROPS;
+		}
+		if (!node->bind.empty()) {
+			flags |= UID_BIND_F_BIND;
+		}
+		if (!node->optionSource.empty()) {
+			flags |= UID_BIND_F_OPTION_SOURCE;
+		}
+		if (node->kind == UID_NODE_LABEL) {
+			flags |= UID_BIND_F_LABEL;
+		}
+		if (node->kind == UID_NODE_KEYBIND) {
+			flags |= UID_BIND_F_KEYBIND;
+		}
+		if (node->kind == UID_NODE_SELECT) {
+			flags |= UID_BIND_F_SELECT;
+		}
+		node->bindingFlags = flags;
+		node->bindingFlagsValid = true;
+	};
+
+	auto probeVisibleEnabled = [](uid_node_def_t *node) {
+		if (!node->visibleExprProbed) {
+			node->visibleExprProbed = true;
+			if (node->visibleExpr.empty()) {
+				std::string vis;
+				if (node->properties.Get("visible", &vis)) {
+					std::string inner;
+					if (UID_ParseBraceBoolExpr(vis.c_str(), &inner)) {
+						node->visibleExpr = inner;
+						node->bindingFlagsValid = false;
+					}
+				}
+			}
+		}
+		if (!node->enabledExprProbed) {
+			node->enabledExprProbed = true;
+			if (node->enabledExpr.empty()) {
+				std::string en;
+				if (node->properties.Get("enabled", &en)) {
+					std::string inner;
+					if (UID_ParseBraceBoolExpr(en.c_str(), &inner)) {
+						node->enabledExpr = inner;
+						node->bindingFlagsValid = false;
+					}
+				}
+			}
+		}
+	};
+
+	/*
+	 * Added in Omaha: apply visibleExpr before SyncCollections so visibility-aware
+	 * collection cull sees this frame's panel visibility (not last frame).
+	 * Always recurse so hidden panels update before a same-frame reveal.
+	 * Phase 4.4: skip untouched subtrees when the cvar index says nothing changed.
+	 */
+	std::vector<unsigned char> &subtreeTouched = doc->bindTouchedScratch;
+	int bindDepsForceFull = 0;
+	int nChangedCvars = 0;
+	const int useBindDeps = (g_bindDeps && backend->cvarModCount) ? 1 : 0;
+
+	auto bindDepsSkip = [&](uid_node_id_t id) -> bool {
+		if (bindDepsForceFull || !useBindDeps || subtreeTouched.empty()) {
+			return false;
+		}
+		if (id < 0 || static_cast<size_t>(id) >= subtreeTouched.size()) {
+			return false;
+		}
+		return subtreeTouched[static_cast<size_t>(id)] == 0;
+	};
+	auto refreshBindDeps = [&](int commitMods) {
+		if (!useBindDeps) {
+			return;
+		}
+		if (doc->bindDepsStale || doc->bindDepsNodeCount != doc->nodes.size()) {
+			UID_RebuildBindDeps(doc, backend);
+		}
+		nChangedCvars += BindDepsMarkTouched(doc, backend, &subtreeTouched, commitMods);
+	};
+
+	UID_ProfileBegin(UID_PROF_FRAME_COLLECTION_CULL);
+	auto applyVisibility = [&](auto &self, uid_node_id_t id) -> void {
+		if (id < 0 || static_cast<size_t>(id) >= doc->nodes.size() || static_cast<size_t>(id) >= doc->states.size()) {
+			return;
+		}
+		if (bindDepsSkip(id)) {
+			return;
+		}
+		uid_node_def_t *node = &doc->nodes[static_cast<size_t>(id)];
+		uid_node_state_t *st = &doc->states[static_cast<size_t>(id)];
+		probeVisibleEnabled(node);
+		ensureBindingFlags(node);
+		if (node->bindingFlags & UID_BIND_F_VISIBLE_EXPR) {
+			const bool show = EvalNodeBoolExprCached(node->visibleExpr, doc, id, backend, st, true);
+			const char *cur = node->properties.GetCStr("visible", "");
+			if (!cur || std::strcmp(cur, show ? "true" : "false") != 0) {
+				node->properties.Set("visible", show ? "true" : "false");
+				UID_MarkDirty(doc, static_cast<uid_dirty_flags_t>(UID_DIRTY_LAYOUT | UID_DIRTY_PAINT), id, "visible_expr");
+			}
+		}
+		for (uid_node_id_t c : node->children) {
+			self(self, c);
+		}
+	};
+	auto applyVisibilityTree = [&]() {
+		if (doc->rootNode != UID_INVALID_NODE_ID) {
+			applyVisibility(applyVisibility, doc->rootNode);
+		}
+		if (UID_IsModalActive(doc)) {
+			const uid_node_id_t modalRoot = UID_GetModalRoot(doc);
+			if (modalRoot != UID_INVALID_NODE_ID) {
+				applyVisibility(applyVisibility, modalRoot);
+			}
+		}
+	};
+	refreshBindDeps(0);
+	if (!(s_bindTxOnly && nChangedCvars == 0 && doc->bindDepsWarm)) {
+		applyVisibilityTree();
+	}
+	UID_ProfileEnd(UID_PROF_FRAME_COLLECTION_CULL);
+	const int firstChanged = nChangedCvars;
+
+	UID_SyncCollections(doc, backend);
+	int collectionRowsChanged = 0;
+	if (!(doc->bindDepsWarm && firstChanged == 0 && !(doc->dirty & UID_DIRTY_BINDING))) {
+		nChangedCvars = 0;
+		refreshBindDeps(1);
+		collectionRowsChanged = useBindDeps ? s_bindCollectionChanged : 0;
+	}
+
+	/*
+	 * Fixed in Omaha: foreach expand clones nodes with visible="{expr}" still in the
+	 * property bag. PropBool cannot parse that and falls back to true, so kill-feed
+	 * skull/headshot/team-icon rows all lay out for one frame (huge gaps). applyVisibility
+	 * ran before SyncCollections and never saw the new nodes; syncOneNodeBody intentionally
+	 * skips visibleExpr. Re-apply after expand so layout in this frame sees true/false.
+	 */
+	UID_ProfileBegin(UID_PROF_FRAME_COLLECTION_CULL);
+	/* vis2 exists for foreach clones born this sync. No STRUCTURE → no new nodes. */
+	/*
+	 * Fixed in OpenMoH Arena: a host refresh that changes only row fields (same
+	 * keys and count: a scoreboard row going from alive to dead) rebuilds nothing,
+	 * so this pass did not run, and the pass at the top of this function ran before
+	 * the new fields arrived. With the cvar dependency index on, the committed mark
+	 * pass above then recorded the new revision as seen, and the rows kept the
+	 * visibility of their old fields until the next rebuild. That mark pass has
+	 * flagged exactly those rows, so the walk visits only them.
+	 */
+	if ((doc->dirty & UID_DIRTY_STRUCTURE) || collectionRowsChanged) {
+		applyVisibilityTree();
+	}
+	UID_ProfileEnd(UID_PROF_FRAME_COLLECTION_CULL);
+
+	/*
+	 * Stage 6b: do NOT force-resync the whole tree on UID_DIRTY_BINDING.
+	 * SyncCollections marks BINDING on every host field refresh (same keys),
+	 * which would disable epoch skip every in-match frame. Foreach/item and
+	 * hover/bind. nodes are impure and always sync; rebuilt nodes reset
+	 * bindSyncCached via UID_InitNodeState.
+	 */
+	const unsigned bindEpoch = (backend->cvarEpoch) ? backend->cvarEpoch() : 0u;
+
+	auto markBindBodySynced = [&](uid_node_def_t *node, uid_node_state_t *st) {
+		if (!st) {
+			return;
+		}
+		(void)node;
+		if (!NodeBindInteractionDirty(st) && backend->cvarEpoch) {
+			st->bindSyncEpoch = bindEpoch;
+			st->bindSyncCached = true;
+		} else {
+			st->bindSyncCached = false;
+		}
+	};
+
+	auto trySkipBindBody = [&](uid_node_def_t *node, uid_node_state_t *st) -> bool {
+		if (!st || !backend->cvarEpoch) {
+			return false;
+		}
+		if (NodeBindInteractionDirty(st)) {
+			return false;
+		}
+		if (!NodeBindBodyIsCvarPure(node)) {
+			return false;
+		}
+		if (st->bindSyncCached && st->bindSyncEpoch == bindEpoch) {
+			return true;
+		}
+		return false;
+	};
+
+	auto syncOneNodeBody = [&](uid_document_t *d, uid_node_id_t id, uid_node_def_t *node, uid_node_state_t *st) {
+		ensureBindingFlags(node);
+		if (trySkipBindBody(node, st)) {
+			return;
+		}
+
+		/*
+		 * Added in Omaha: foreach row nodes rebind item.* only when the enclosing
+		 * collection revision or this row's foreachItemIndex changes. Cvar/style/expr
+		 * paths still run (they have their own memos). Applies to every foreach source.
+		 * Fixed in Omaha: SyncExprBoundProps must run here — ammo edge-clip
+		 * top/height use cvar math in exprBoundProps, not style/cvar binds.
+		 * Fixed in Omaha: itemBindItemIndex tracks mode=selected in-place rebind.
+		 */
+		if (node->foreachGenerated && node->foreachScopeId >= 0 &&
+			static_cast<size_t>(node->foreachScopeId) < d->states.size() &&
+			!NodeBindInteractionDirty(st)
+			) {
+			const uid_node_state_t &scopeSt = d->states[static_cast<size_t>(node->foreachScopeId)];
+			const uint64_t scopeRev = scopeSt.collectionRevision;
+			if (st->itemBindRevision == scopeRev && scopeRev != 0 &&
+				st->itemBindItemIndex == node->foreachItemIndex) {
+				const unsigned flags = node->bindingFlags;
+				if (flags & UID_BIND_F_ENABLED_EXPR) {
+					const bool on = EvalNodeBoolExprCached(node->enabledExpr, d, id, backend, st, false);
+					const char *cur = node->properties.GetCStr("enabled", "");
+					if (!cur || std::strcmp(cur, on ? "true" : "false") != 0) {
+						node->properties.Set("enabled", on ? "true" : "false");
+						UID_MarkDirty(d, static_cast<uid_dirty_flags_t>(UID_DIRTY_LAYOUT | UID_DIRTY_PAINT), id, "enabled_expr");
+					}
+				}
+				if (flags & UID_BIND_F_STYLE) {
+					SyncBoundStyleExprs(d, id, node, backend);
+				}
+				if (flags & UID_BIND_F_CVAR_PROPS) {
+					SyncCvarBoundProps(d, id, node, backend);
+				}
+				if (flags & UID_BIND_F_EXPR_PROPS) {
+					SyncExprBoundProps(d, id, node, backend);
+				}
+				if (flags & UID_BIND_F_BIND) {
+					std::string cvarName;
+					if (UID_ParseCvarBind(node->bind.c_str(), &cvarName)) {
+						SyncCvarBind(d, id, node, st, backend, cvarName);
+					}
+				}
+				return;
+			}
+		}
+
+		const unsigned flags = node->bindingFlags;
+
+		/*
+		 * Stage 6: visibleExpr already applied in applyVisibility prepass —
+		 * do not re-eval here (was double-cost every node every frame).
+		 */
+
+		if (flags & UID_BIND_F_ENABLED_EXPR) {
+			const bool on = EvalNodeBoolExprCached(node->enabledExpr, d, id, backend, st, false);
+			const char *cur = node->properties.GetCStr("enabled", "");
+			if (!cur || std::strcmp(cur, on ? "true" : "false") != 0) {
+				node->properties.Set("enabled", on ? "true" : "false");
+				UID_MarkDirty(d, static_cast<uid_dirty_flags_t>(UID_DIRTY_LAYOUT | UID_DIRTY_PAINT), id, "enabled_expr");
+			}
+		}
+
+		if (flags & UID_BIND_F_STYLE) {
+			SyncBoundStyleExprs(d, id, node, backend);
+		}
+		if (flags & UID_BIND_F_CVAR_PROPS) {
+			SyncCvarBoundProps(d, id, node, backend);
+		}
+		if (flags & UID_BIND_F_EXPR_PROPS) {
+			SyncExprBoundProps(d, id, node, backend);
+		}
+
+		if ((flags & UID_BIND_F_SELECT) && (flags & UID_BIND_F_OPTION_SOURCE)) {
+			RefreshOptionSource(d, node, backend);
+		}
+
+		if (flags & UID_BIND_F_LABEL) {
+			SyncTextCvarLabel(d, id, node, st, backend);
+			SyncForeachItemText(d, id, node, st, backend);
+			SyncInterpolatedLabelText(d, id, node, st, backend);
+		} else if (node->foreachGenerated && node->text.find("{item.") != std::string::npos) {
+			/* Buttons / other text nodes in foreach rows (e.g. modal item lists). */
+			SyncForeachItemText(d, id, node, st, backend);
+		}
+
+		if (flags & UID_BIND_F_KEYBIND) {
+			SyncKeybindDisplay(d, id, node, st, backend);
+			markBindBodySynced(node, st);
+			return;
+		}
+
+		if (flags & UID_BIND_F_BIND) {
+			std::string cvarName;
+			if (UID_ParseCvarBind(node->bind.c_str(), &cvarName)) {
+				SyncCvarBind(d, id, node, st, backend, cvarName);
+			}
+		}
+		if (node->foreachGenerated && node->foreachScopeId >= 0 &&
+			static_cast<size_t>(node->foreachScopeId) < d->states.size()) {
+			st->itemBindRevision =
+				d->states[static_cast<size_t>(node->foreachScopeId)].collectionRevision;
+			st->itemBindItemIndex = node->foreachItemIndex;
+		}
+		markBindBodySynced(node, st);
+	};
+
+	auto syncRecursive = [&](auto &self, uid_node_id_t id, bool ancestorVisible) -> void {
+		if (id < 0 || static_cast<size_t>(id) >= doc->nodes.size() || static_cast<size_t>(id) >= doc->states.size()) {
+			return;
+		}
+		if (bindDepsSkip(id)) {
+			return;
+		}
+		uid_node_def_t *node = &doc->nodes[static_cast<size_t>(id)];
+		uid_node_state_t *st = &doc->states[static_cast<size_t>(id)];
+
+		probeVisibleEnabled(node);
+		ensureBindingFlags(node);
+
+		/*
+		 * Stage 6: visibleExpr already applied in applyVisibility prepass.
+		 * Read the property for ancestor culling only.
+		 */
+
+		bool selfVisible = ancestorVisible;
+		{
+			const char *vis = node->properties.GetCStr("visible", "true");
+			bool v = true;
+			if (vis && UID_ParseBool(vis, &v, nullptr)) {
+				selfVisible = ancestorVisible && v;
+			} else {
+				selfVisible = ancestorVisible;
+			}
+		}
+
+		if (!selfVisible) {
+			return;
+		}
+
+		syncOneNodeBody(doc, id, node, st);
+
+		for (uid_node_id_t c : node->children) {
+			self(self, c, true);
+		}
+	};
+
+	auto syncAllNodesFlat = [&]() {
+		const size_t n = doc->nodes.size() < doc->states.size() ? doc->nodes.size() : doc->states.size();
+		for (size_t i = 0; i < n; ++i) {
+			if (bindDepsSkip(static_cast<uid_node_id_t>(i))) {
+				continue;
+			}
+			uid_node_def_t *node = &doc->nodes[i];
+			uid_node_state_t *st = &doc->states[i];
+			probeVisibleEnabled(node);
+			syncOneNodeBody(doc, static_cast<uid_node_id_t>(i), node, st);
+		}
+	};
+
+	{
+		auto nodeHasTranslateBind = [](const uid_node_def_t *node) -> bool {
+			if (!node) {
+				return false;
+			}
+			for (const auto &kv : node->cvarBoundProps) {
+				if (IsTranslateProp(kv.first)) {
+					return true;
+				}
+			}
+			for (const auto &kv : node->exprBoundProps) {
+				if (IsTranslateProp(kv.first)) {
+					return true;
+				}
+			}
+			return false;
+		};
+		auto syncTranslateLeaves = [&]() {
+			const size_t nT = subtreeTouched.size() < doc->nodes.size()
+				? subtreeTouched.size()
+				: doc->nodes.size();
+			for (size_t i = 0; i < nT && i < doc->states.size(); ++i) {
+				if (!subtreeTouched[i] || !nodeHasTranslateBind(&doc->nodes[i])) {
+					continue;
+				}
+				uid_node_def_t *node = &doc->nodes[i];
+				ensureBindingFlags(node);
+				if (node->bindingFlags & UID_BIND_F_CVAR_PROPS) {
+					SyncCvarBoundProps(doc, static_cast<uid_node_id_t>(i), node, backend);
+				}
+				if (node->bindingFlags & UID_BIND_F_EXPR_PROPS) {
+					SyncExprBoundProps(doc, static_cast<uid_node_id_t>(i), node, backend);
+				}
+			}
+		};
+		if (s_bindTxOnly && firstChanged == 0 && useBindDeps && doc->bindDepsWarm) {
+			syncTranslateLeaves();
+		} else if (UID_OptEnabled(UID_OPT_BIND_CULL)) {
+			if (doc->rootNode != UID_INVALID_NODE_ID) {
+				syncRecursive(syncRecursive, doc->rootNode, true);
+			}
+			if (UID_IsModalActive(doc)) {
+				const uid_node_id_t modalRoot = UID_GetModalRoot(doc);
+				if (modalRoot != UID_INVALID_NODE_ID) {
+					syncRecursive(syncRecursive, modalRoot, true);
+				}
+			}
+		} else {
+			syncAllNodesFlat();
+		}
+		if (s_bindTxChanged > 0 && !(s_bindTxOnly && firstChanged == 0) && doc->bindDepsWarm) {
+			syncTranslateLeaves();
+		}
+	}
+
+
+	/* Added in Omaha: Phase 4.4 verify — full walk after targeted sync; must stay silent. */
+	if (useBindDeps && (g_bindDepsVerify || ((doc->syncFrameCounter % 2000) == 1))) {
+		bindDepsForceFull = 1;
+		applyVisibilityTree();
+		if (UID_OptEnabled(UID_OPT_BIND_CULL)) {
+			if (doc->rootNode != UID_INVALID_NODE_ID) {
+				syncRecursive(syncRecursive, doc->rootNode, true);
+			}
+			if (UID_IsModalActive(doc)) {
+				const uid_node_id_t modalRoot = UID_GetModalRoot(doc);
+				if (modalRoot != UID_INVALID_NODE_ID) {
+					syncRecursive(syncRecursive, modalRoot, true);
+				}
+			}
+		} else {
+			syncAllNodesFlat();
+		}
+		bindDepsForceFull = 0;
+	}
+
+	if (useBindDeps) {
+		doc->bindDepsWarm = true;
+	}
+
+	g_cvarMemoActive = false;
+	g_cvarMemo.clear();
+	doc->dirty = static_cast<uid_dirty_flags_t>(doc->dirty & ~UID_DIRTY_BINDING);
+}
+
+uid_result_t UID_WriteBinding(uid_document_t *doc, uid_node_id_t nodeId, const uid_backend_t *backend)
+{
+	if (!doc || !backend) {
+		return UID_ERR_INVALID_ARG;
+	}
+
+	uid_node_def_t *node = UID_GetNode(doc, nodeId);
+	if (!node) {
+		return UID_ERR_INVALID_ARG;
+	}
+	if (nodeId < 0 || static_cast<size_t>(nodeId) >= doc->states.size()) {
+		return UID_ERR_INVALID_ARG;
+	}
+	uid_node_state_t *st = &doc->states[static_cast<size_t>(nodeId)];
+
+	if (node->kind == UID_NODE_KEYBIND) {
+		return WriteKeybind(node, st, backend);
+	}
+
+	if (node->bind.empty()) {
+		return UID_ERR_INVALID_ARG;
+	}
+
+	std::string cvarName;
+	if (!UID_ParseCvarBind(node->bind.c_str(), &cvarName)) {
+		return UID_ERR_VALIDATE;
+	}
+
+	/*
+	 * Commit modes share the same write path: CHANGE callers write on each
+	 * accepted edit; SUBMIT/APPLY callers write when flushing staged values.
+	 * Staging is preserved on sync (see StagingBlocksSync), not here.
+	 */
+	(void)node->commit;
+	return WriteCvarBind(node, st, backend, cvarName);
+}
+
+uid_result_t UID_WriteAllBindings(uid_document_t *doc, const uid_backend_t *backend)
+{
+	if (!doc || !backend) {
+		return UID_ERR_INVALID_ARG;
+	}
+
+	uid_result_t worst = UID_OK;
+	const size_t n = doc->nodes.size() < doc->states.size() ? doc->nodes.size() : doc->states.size();
+	for (size_t i = 0; i < n; ++i) {
+		const uid_node_def_t &node = doc->nodes[i];
+		bool shouldWrite = false;
+		/*
+		 * Keybind nodes commit on capture (UID_TryCommitKeybindCapture) or explicit
+		 * clear — not via bulk flush. runtimeValue holds display labels, not keys.
+		 */
+		if (!node.bind.empty() && node.hasCommit && node.commit == UID_COMMIT_APPLY) {
+			shouldWrite = true;
+		}
+		if (!shouldWrite) {
+			continue;
+		}
+		const uid_result_t r = UID_WriteBinding(doc, static_cast<uid_node_id_t>(i), backend);
+		if (r == UID_OK) {
+			doc->states[i].applyUserEdited = false;
+		}
+		if (r != UID_OK && worst == UID_OK) {
+			worst = r;
+		}
+	}
+	return worst;
+}
+
+/* Added in Omaha: drop commit=apply staging so the next sync can pull reset cvars. */
+void UID_ClearApplyStagedBindings(uid_document_t *doc)
+{
+	if (!doc) {
+		return;
+	}
+	const size_t n = doc->nodes.size() < doc->states.size() ? doc->nodes.size() : doc->states.size();
+	for (size_t i = 0; i < n; ++i) {
+		const uid_node_def_t &node = doc->nodes[i];
+		if (!node.hasCommit || node.commit != UID_COMMIT_APPLY) {
+			continue;
+		}
+		doc->states[i].runtimeValue.hasValue = false;
+		doc->states[i].runtimeValue.stringValue.clear();
+		doc->states[i].applyUserEdited = false;
+	}
+	UID_MarkDirty(doc, static_cast<uid_dirty_flags_t>(UID_DIRTY_BINDING | UID_DIRTY_PAINT | UID_DIRTY_LAYOUT), UID_INVALID_NODE_ID, "revert_apply");
+}
+
+static bool CvarNameAllowed(const char *name, const char *const *allowList)
+{
+	if (!allowList) {
+		return true;
+	}
+	if (!name || !name[0]) {
+		return false;
+	}
+	for (int i = 0; allowList[i]; ++i) {
+		if (allowList[i][0] && std::strcmp(name, allowList[i]) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Added in Omaha: detect staged commit=apply edits that still need settings-apply. */
+bool UID_HasPendingApplyBindings(
+	const uid_document_t *doc,
+	const uid_backend_t *backend,
+	const char *const *cvarAllowList
+)
+{
+	if (!doc || !backend) {
+		return false;
+	}
+	const size_t n = doc->nodes.size() < doc->states.size() ? doc->nodes.size() : doc->states.size();
+	for (size_t i = 0; i < n; ++i) {
+		const uid_node_def_t &node = doc->nodes[i];
+		const uid_node_state_t &st = doc->states[i];
+		if (!node.hasCommit || node.commit != UID_COMMIT_APPLY || node.bind.empty()) {
+			continue;
+		}
+		if (!st.runtimeValue.hasValue || !st.applyUserEdited) {
+			continue;
+		}
+		std::string cvarName;
+		if (!UID_ParseCvarBind(node.bind.c_str(), &cvarName)) {
+			continue;
+		}
+		if (!CvarNameAllowed(cvarName.c_str(), cvarAllowList)) {
+			continue;
+		}
+		std::string live;
+		if (!UID_ReadCvarString(backend, cvarName.c_str(), &live)) {
+			continue;
+		}
+		/*
+		 * Match SyncCvarBind display path (transform + control formatting) so
+		 * pending is false when the staged UI value still equals the live cvar.
+		 */
+		const std::string liveUi =
+			FormatControlDisplayValue(node, TransformCvarToUi(node, live, backend));
+		if (liveUi != st.runtimeValue.stringValue) {
+			return true;
+		}
+	}
+	return false;
+}
+
+std::string UID_TransformCvarToUi(
+	const uid_node_def_t &node,
+	const std::string &cvarValue,
+	const uid_backend_t *backend
+)
+{
+	return TransformCvarToUi(node, cvarValue, backend);
+}
+
+std::string UID_KeybindEmptyLabel(const uid_node_def_t &node)
+{
+	const char *label = node.properties.GetCStr("empty-label", nullptr);
+	return (label && label[0]) ? label : "NONE";
+}
+
+std::string UID_KeybindCaptureLabel(const uid_node_def_t &node)
+{
+	const char *label = node.properties.GetCStr("capture-label", nullptr);
+	return (label && label[0]) ? label : "Press a key...";
+}

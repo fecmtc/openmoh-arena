@@ -53,9 +53,10 @@ Each release on the
 [Releases page](https://github.com/fecmtc/openmoh-arena/releases) comes with
 Windows builds for x64 (64-bit Windows) and x86 (32-bit Windows).
 
-Each zip holds the game's executables and libraries, `COPYING.txt`,
-`SOURCE-OFFER.txt` and `SHA256SUMS.txt`. The release notes name the commit the
-builds were made from.
+Each zip holds the game's executables and libraries, the pack of the
+[optional modern UI](#optional-modern-ui) (`main/zz_moharena_ui.pk3`),
+`COPYING.txt`, `SOURCE-OFFER.txt`, `THIRD-PARTY.txt` and `SHA256SUMS.txt`. The
+release notes name the commit the builds were made from.
 
 These are the builds that [MoH Arena Guard](https://moharena.com/anti-cheat)
 accepts.
@@ -68,7 +69,8 @@ Builds for Linux and macOS are not published yet.
 
 1. Download the zip for your Windows: x64 for 64-bit Windows, x86 for 32-bit.
 2. Extract it into your Medal of Honor: Allied Assault folder, the one that
-   holds `main`.
+   holds `main`. The zip has a `main` folder of its own with one file, which
+   goes into yours.
 3. Start `launch_openmohaa_base.exe` (Allied Assault),
    `launch_openmohaa_spearhead.exe` (Spearhead) or
    `launch_openmohaa_breakthrough.exe` (Breakthrough), or pick one of them in
@@ -84,9 +86,38 @@ lists what players see. In short:
   menu and the other MoH Arena features. The module loads only when Guard
   starts the game and the module file has the SHA-256 that Guard gives.
   In any other case the game runs like OpenMoHAA.
+* An [optional modern UI](#optional-modern-ui), off by default.
 
 OpenMoH Arena uses the same network protocol as OpenMoHAA, so it joins the
 same servers.
+
+## Optional modern UI
+
+OpenMoH Arena can show the menus and HUD of
+[Project: Omaha](https://github.com/JayRewd/omaha) by JayRewd instead of the
+original ones.
+
+It is off by default. The player turns it on in MoH Arena Guard with the
+"Use the modern UI" box, and Guard then starts the client with
+`+set ui_legacy 0`. With it off, the game looks and behaves as it did before.
+
+Rules for work on it:
+
+* the original UI stays the default, and nothing of the modern UI may change it
+* what the modern UI may change is the fixed list in
+  `code/client/cl_moharena_uipolicy.cpp`, never the XML
+* a setting it offers must stay inside MoH Arena's rules
+* it changes a setting or a key bind only when the player changes the control
+  for it
+* its files ship as one pack, `main/zz_moharena_ui.pk3`, built by
+  `misc/moharena/make_modern_ui_pk3.py`
+
+Project: Omaha built its UI for Allied Assault. Spearhead and Breakthrough are
+not complete in it yet.
+
+See `docs/modern-ui/README.md` for how it is built and what was left out, and
+`misc/moharena/THIRD-PARTY.txt` for the credits and licences of the parts by
+others.
 
 ## Building
 

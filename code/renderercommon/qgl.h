@@ -39,6 +39,8 @@ extern void (APIENTRYP qglMultiTexCoord2fARB) (GLenum target, GLfloat s, GLfloat
 extern void (APIENTRYP qglLockArraysEXT) (GLint first, GLsizei count);
 extern void (APIENTRYP qglUnlockArraysEXT) (void);
 
+extern void (APIENTRYP qglBlendFuncSeparate) (GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha);
+
 
 //===========================================================================
 
@@ -141,6 +143,15 @@ extern void (APIENTRYP qglUnlockArraysEXT) (void);
 	GLE(void, Frustumf, GLfloat left, GLfloat right, GLfloat bottom, GLfloat top, GLfloat near_val, GLfloat far_val) \
 	GLE(void, Orthof, GLfloat left, GLfloat right, GLfloat bottom, GLfloat top, GLfloat near_val, GLfloat far_val) \
 
+// Added in MoH Arena: glIsEnabled has its own list, apart from QGL_1_1_PROCS.
+//  Only the modern UI uses it, so the driver is only asked for it there.
+#define QGL_1_1_MODERN_UI_PROCS \
+	GLE(GLboolean, IsEnabled, GLenum cap) \
+
+/* Added in Omaha: OpenGL 1.2 DrawRangeElements for UI batch draws (Phase 1.4). */
+#define QGL_1_2_PROCS \
+	GLE(void, DrawRangeElements, GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices) \
+
 // OpenGL 1.3, was GL_ARB_texture_compression
 #define QGL_1_3_PROCS \
 	GLE(void, ActiveTexture, GLenum texture) \
@@ -155,6 +166,20 @@ extern void (APIENTRYP qglUnlockArraysEXT) (void);
 	GLE(void, EndQuery, GLenum target) \
 	GLE(void, GetQueryObjectiv, GLuint id, GLenum pname, GLint *params) \
 	GLE(void, GetQueryObjectuiv, GLuint id, GLenum pname, GLuint *params) \
+
+// GL_ARB_timer_query (OpenGL 3.3) — Added in Omaha: ui_perf_gpu
+#define QGL_ARB_timer_query_PROCS \
+	GLE(void, GetQueryObjectui64v, GLuint id, GLenum pname, GLuint64 *params) \
+
+#ifndef GL_TIME_ELAPSED
+#define GL_TIME_ELAPSED 0x88BF
+#endif
+#ifndef GL_QUERY_RESULT_AVAILABLE
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#endif
+#ifndef GL_QUERY_RESULT
+#define GL_QUERY_RESULT 0x8866
+#endif
 
 // OpenGL 1.5, was GL_ARB_vertex_buffer_object
 #define QGL_1_5_PROCS \
@@ -327,14 +352,29 @@ QGL_DESKTOP_1_1_PROCS;
 QGL_DESKTOP_1_1_FIXED_FUNCTION_PROCS;
 QGL_ES_1_1_PROCS;
 QGL_ES_1_1_FIXED_FUNCTION_PROCS;
+QGL_1_1_MODERN_UI_PROCS;
+QGL_1_2_PROCS;
 QGL_1_3_PROCS;
 QGL_1_5_PROCS;
 QGL_2_0_PROCS;
 QGL_3_0_PROCS;
 QGL_ARB_occlusion_query_PROCS;
+QGL_ARB_timer_query_PROCS;
 QGL_ARB_framebuffer_object_PROCS;
 QGL_ARB_vertex_array_object_PROCS;
 QGL_EXT_direct_state_access_PROCS;
+#undef GLE
+
+// Changed in MoH Arena: C linkage in C++ files too. The tr_local.h of renderergl2
+//  declares the same pointers that way, and its C++ files did not compile without it.
+#ifdef __cplusplus
+#define GLE(ret, name, ...) extern "C" name##proc *qgl##name;
+#else
+#define GLE(ret, name, ...) extern name##proc *qgl##name;
+#endif
+QGL_ARB_occlusion_query_PROCS;
+QGL_ARB_timer_query_PROCS;
+QGL_ARB_framebuffer_object_PROCS;
 #undef GLE
 
 extern int qglMajorVersion, qglMinorVersion;

@@ -1128,6 +1128,21 @@ inventory_item_t *CL_GetInvItemByName(inventory_t *inv, const char *name)
         const inventory_type_t *type = inv->types.ObjectAt(i);
 
         for (int ii = 1; ii <= type->items.NumObjects(); ii++) {
+            // Added in MoH Arena: Omaha's fixed lookup, used by the modern HUD only
+            if (MoHArena_ModernUI()) {
+                // Fixed in Omaha: iterate items with ii (was wrongly using outer type index i).
+                inventory_item_t *fixedItem = type->items.ObjectAt(ii);
+
+                if (!fixedItem) {
+                    return NULL;
+                }
+
+                if (name && !str::icmp(fixedItem->name, name)) {
+                    return fixedItem;
+                }
+                continue;
+            }
+
             inventory_item_t *item = type->items.ObjectAt(i);
 
             if (!item) {
@@ -1169,6 +1184,18 @@ void CL_AmmoCount(const char *name, int *ammo_count, int *max_ammo_count)
 
     for (i = 0; i < ARRAY_LEN(cl.snap.ps.ammo_name_index); i++) {
         int index = cl.snap.ps.ammo_name_index[i];
+        // Added in MoH Arena: Omaha's fixed lookup, used by the modern HUD only
+        if (MoHArena_ModernUI()) {
+            /* Fixed in Omaha: ammo_name_index is absolute CS index (not offset from CS_WEAPONS). */
+            if (index > 0 && index < MAX_CONFIGSTRINGS) {
+                if (!str::icmp(name, CL_ConfigString(index))) {
+                    *ammo_count     = cl.snap.ps.ammo_amount[i];
+                    *max_ammo_count = cl.snap.ps.max_ammo_amount[i];
+                    break;
+                }
+            }
+            continue;
+        }
         if (index) {
             if (!str::icmp(name, CL_ConfigString(CS_WEAPONS + index))) {
                 *ammo_count     = cl.snap.ps.ammo_amount[i];

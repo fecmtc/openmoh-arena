@@ -66,6 +66,13 @@ set(SOURCE_DIR ${CMAKE_SOURCE_DIR}/code)
 # Enable unit testing
 include(CTest)
 
+# Changed in MoH Arena: the test programs of the modern UI are built only when
+# asked for, so a plain build has the same targets as before.
+option(MOHARENA_UI_TESTS "Build the test programs of the modern UI" OFF)
+if(BUILD_TESTING AND MOHARENA_UI_TESTS)
+  include(tests/all)
+endif()
+
 if(DEFINED ENV{SOURCE_DATE_EPOCH})
     string(TIMESTAMP PRODUCT_DATE "%b %d %Y" UTC)
     add_compile_definitions(PRODUCT_DATE="${PRODUCT_DATE}")

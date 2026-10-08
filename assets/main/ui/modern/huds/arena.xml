@@ -1,0 +1,162 @@
+<ui version="1">
+	<!--
+	  MoH Arena: a HUD style put together from the three of Project: Omaha.
+
+	    competitive  the round compass, the top bar (team squares, score, time)
+	                 and the kill feed
+	    classic      the health bar, the vote prompt, the name under the
+	                 crosshair, the voice menu, and the team and weapon menus
+	                 (pause-menu="dm_pause")
+	    modern       the weapon panel and the grenades
+
+	  Five player settings size its parts: ui_om_hud_compass_scale,
+	  ui_om_hud_topbar_scale, ui_om_hud_killfeed_size, ui_om_hud_messages_size
+	  and ui_om_hud_chat_size. The three feeds take a text size in px, and
+	  their boxes grow with it (16px is the size of the other styles).
+	-->
+	<definitions hud-id="arena" hud-label="Arena" draw-order="4"
+	             pause-menu="dm_pause" scoreboard-menu="scoreboard">
+		<import src="ui/modern/lib/theme.xml"/>
+		<import src="ui/modern/lib/hud_modern_tokens.xml"/>
+		<import src="ui/modern/lib/shapes.xml"/>
+		<import src="ui/modern/lib/hud_modern_images.xml"/>
+		<import src="ui/modern/lib/hud_images.xml"/>
+		<import src="ui/modern/lib/hud_messaging.xml"/>
+		<import src="ui/modern/lib/hud_modern.xml"/>
+		<import src="ui/modern/lib/hud_modern_grenade.xml"/>
+		<import src="ui/modern/lib/hud_arena.xml"/>
+	</definitions>
+	<canvas>
+		<!--
+		  The root stays visible so that the feeds and the chat are still there
+		  at the end of a map. The rest follows ui_om_hud_show.
+		-->
+		<container id="hud_root" type="overlap" width="100%" height="100%" fill="{var.fill-transparent}">
+			<container id="hud_main" type="vertical" width="100%" height="100%" padding="32px" fill="{var.fill-transparent}">
+				<!-- As tall as the compass, so the messages start right under it. -->
+				<container id="hud_top_row" type="horizontal" width="100%" height="{160 * cvar.ui_om_hud_compass_scale}px">
+					<container id="hud_top_row_left" type="horizontal" width="fill" height="auto" halign="start" valign="start"
+					           visible="{cvar.ui_om_hud_show}">
+						<use id="arena_compass" template="arena-compass"/>
+					</container>
+					<container id="hud_top_row_center" type="vertical" width="50%" height="100%"
+					           halign="center" valign="start"
+					           visible="{cvar.ui_om_hud_show}">
+						<!-- Allies | time | Axis in team games, own score | time | leader otherwise. -->
+						<container type="horizontal" width="auto" height="{32 * cvar.ui_om_hud_topbar_scale}px"
+						           gap="{4 * cvar.ui_om_hud_topbar_scale}px"
+						           halign="center" valign="center"
+						           fill="{var.fill-transparent}"
+						           visible="{cvar.cg_gametype > 0}">
+							<use template="arena-roster" team="allies" side="left"/>
+							<container width="auto" height="auto" fill="{var.fill-transparent}"
+							           visible="{cvar.cg_gametype > 1 and cvar.ui_om_hud_allied_score != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-hud-allied-score}"
+								     bind="cvar:ui_om_hud_allied_score"/>
+							</container>
+							<container width="auto" height="auto" fill="{var.fill-transparent}"
+							           visible="{cvar.cg_gametype == 1 and cvar.ui_om_hud_score_self != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-panel}"
+								     bind="cvar:ui_om_hud_score_self"/>
+							</container>
+							<use template="arena-timer-box"/>
+							<container width="auto" height="auto" fill="{var.fill-transparent}"
+							           visible="{cvar.cg_gametype > 1 and cvar.ui_om_hud_axis_score != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-hud-axis-score}"
+								     bind="cvar:ui_om_hud_axis_score"/>
+							</container>
+							<container width="auto" height="auto" fill="{var.fill-transparent}"
+							           visible="{cvar.cg_gametype == 1 and cvar.ui_om_hud_score_leader != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-panel}"
+								     bind="cvar:ui_om_hud_score_leader"/>
+							</container>
+							<use template="arena-roster" team="axis" side="right"/>
+						</container>
+					</container>
+					<!-- The kill feed has a layer of its own below: its height is not tied to this row. -->
+					<container id="hud_top_row_right" type="horizontal" width="fill" height="100%" halign="end" valign="start"/>
+				</container>
+				<container id="hud_middle_row" type="horizontal" width="fill" height="fill" halign="start" valign="start">
+					<container id="hud_middle_row_left" type="overlap" width="fill" height="100%"
+					           fill="{var.fill-transparent}">
+						<use template="hud-game-messages-panel"
+						     width="{22.5 * cvar.ui_om_hud_messages_size}px"
+						     height="{7.5 * cvar.ui_om_hud_messages_size}px"
+						     font-size="{cvar.ui_om_hud_messages_size}px"/>
+						<container width="auto" height="auto" halign="start" valign="center"
+						           fill="{var.fill-transparent}" visible="{cvar.ui_om_hud_show}">
+							<use template="arena-im-panel"/>
+						</container>
+						<use id="arena_chat" template="hud-chat-panel"
+						     width="{22.5 * cvar.ui_om_hud_chat_size}px"
+						     height="{10 * cvar.ui_om_hud_chat_size}px"
+						     font-size="{cvar.ui_om_hud_chat_size}px"
+						     halign="start" valign="end"/>
+					</container>
+					<container id="hud_middle_row_center" type="vertical" width="33%" height="100%" halign="center" valign="start"
+					           visible="{cvar.ui_om_hud_show}">
+						<container width="100%" height="16px" fill="{var.fill-transparent}"/>
+						<use template="arena-vote-panel"/>
+					</container>
+					<container id="hud_middle_row_right" type="horizontal" width="fill" height="100%" halign="end" valign="center">
+					</container>
+				</container>
+				<container id="hud_bottom_row" type="horizontal" width="100%" height="auto" valign="end">
+					<container id="hud_bottom_row_left" type="vertical" width="fill" height="auto" halign="start" valign="end" gap="6px"
+					           visible="{cvar.ui_om_hud_show}">
+						<label id="spectated_player_name" font="body" font-size="18px" font-weight="700"
+						       width="auto" height="auto" halign="start" valign="center" drop-shadow="true"
+						       color="{cvar.ui_om_hud_following_team == &quot;axis&quot; ? var.color-axis : var.color-allied}"
+						       visible="{cvar.ui_om_hud_following_name != ''}"
+						       bind="cvar:ui_om_hud_following_name"/>
+						<!-- No health of one's own while watching freely. -->
+						<container width="auto" height="auto" fill="{var.fill-transparent}"
+						           visible="{cvar.ui_om_hud_spectator_text == '' or cvar.ui_om_hud_following_text != ''}">
+							<use template="arena-health-panel"/>
+						</container>
+					</container>
+					<container id="hud_bottom_row_center" type="vertical" width="50%" height="auto" halign="center" valign="center">
+						<label font="body" font-size="18px" width="100%" height="auto" halign="center" valign="center" text-wrap="word"
+						       color="{var.color-white}" drop-shadow="true" visible="{cvar.ui_om_hud_centerprint != ''}"
+						       bind="cvar:ui_om_hud_centerprint">
+							{cvar.ui_om_hud_centerprint}
+						</label>
+						<label font="body" font-size="18px" width="100%" height="auto" halign="center" valign="center" text-wrap="word"
+						       color="{var.color-white}" drop-shadow="true"
+						       visible="{cvar.ui_om_hud_show and cvar.ui_om_hud_spectator_text != ''}"
+						       bind="cvar:ui_om_hud_spectator_text">
+							{cvar.ui_om_hud_spectator_text}
+						</label>
+					</container>
+					<container id="hud_bottom_row_right" type="horizontal" width="fill" height="auto" gap="12px"
+					           halign="end" valign="end"
+					           visible="{cvar.ui_om_hud_show}">
+						<use id="grenade_inventory" template="modern-grenade-inventory"/>
+						<use id="weapons_bar" template="modern-weapons-bar"/>
+					</container>
+				</container>
+			</container>
+			<!-- The kill feed, top right, with the same 32px inset as the rest. -->
+			<container id="hud_killfeed_parent" type="horizontal" width="100%" height="100%" padding="32px"
+			           halign="end" valign="start" fill="{var.fill-transparent}">
+				<use template="arena-kill-feed-panel"/>
+			</container>
+			<!-- The player under the crosshair, a little below the middle of the screen. -->
+			<container id="hud_target_parent" type="vertical" width="100%" height="100%" halign="center" valign="start"
+			           fill="{var.fill-transparent}" visible="{cvar.ui_om_hud_show}">
+				<container width="100%" height="56%" fill="{var.fill-transparent}"/>
+				<use template="arena-target-info-panel"/>
+			</container>
+			<container id="hud_stopwatch_parent" type="vertical" width="100%" height="100%" halign="center" valign="center" padding="16px">
+				<container id="hud_stopwatch_container_top" type="vertical" width="100%" height="50%" halign="center" valign="center"/>
+				<container id="hud_stopwatch_container_bottom" type="vertical" width="100%" height="50%" halign="center" valign="center">
+					<!-- Planting or defusing: a bar that shrinks from 300px to nothing. -->
+					<container type="horizontal" width="{300 * cvar.ui_om_hud_stopwatch_frac}px" height="24px"
+					           margin="0 0 0 0" halign="center" valign="center"
+					           fill="{var.fill-hud-stopwatch}"
+					           visible="{cvar.ui_om_hud_stopwatch_ms > 0}"/>
+				</container>
+			</container>
+		</container>
+	</canvas>
+</ui>

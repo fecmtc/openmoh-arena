@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_parsemsg.h"
 #include "cg_specialfx.h"
 #include "cg_radar.h"
+#include "cg_hitmarker.h"
 
 #include "../corepp/str.h"
 
@@ -1664,19 +1665,25 @@ void CG_ParseCGMessage_ver_15()
         case CGM_NOTIFY_HIT:
         case CGM_NOTIFY_KILL:
             if (cg.snap) {
-                const char *soundName;
-                int         iOldEnt;
-
-                iOldEnt = current_entity_number;
-
-                current_entity_number = cg.snap->ps.clientNum;
-                if (iType == CGM_NOTIFY_KILL) {
-                    commandManager.PlaySound("dm_kill_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
+                // Changed in MoH Arena: hitmarkers belong to the modern UI
+                /* Added in Omaha: hitmarker uses stock notify; suppress retail ding when enabled. */
+                if (CG_ModernUI() && CG_Hitmarker_SuppressRetailNotify()) {
+                    CG_Hitmarker_OnNotify(iType == CGM_NOTIFY_KILL ? qtrue : qfalse);
                 } else {
-                    commandManager.PlaySound("dm_hit_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
-                }
+                    const char *soundName;
+                    int         iOldEnt;
 
-                current_entity_number = iOldEnt;
+                    iOldEnt = current_entity_number;
+
+                    current_entity_number = cg.snap->ps.clientNum;
+                    if (iType == CGM_NOTIFY_KILL) {
+                        commandManager.PlaySound("dm_kill_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
+                    } else {
+                        commandManager.PlaySound("dm_hit_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
+                    }
+
+                    current_entity_number = iOldEnt;
+                }
             }
             break;
 
@@ -2061,18 +2068,24 @@ void CG_ParseCGMessage_ver_6()
         case CGM6_NOTIFY_HIT:
         case CGM6_NOTIFY_KILL:
             if (cg.snap) {
-                int iOldEnt;
-
-                iOldEnt = current_entity_number;
-
-                current_entity_number = cg.snap->ps.clientNum;
-                if (iType == CGM6_NOTIFY_KILL) {
-                    commandManager.PlaySound("dm_kill_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
+                // Changed in MoH Arena: hitmarkers belong to the modern UI
+                /* Added in Omaha: hitmarker uses stock notify; suppress retail ding when enabled. */
+                if (CG_ModernUI() && CG_Hitmarker_SuppressRetailNotify()) {
+                    CG_Hitmarker_OnNotify(iType == CGM6_NOTIFY_KILL ? qtrue : qfalse);
                 } else {
-                    commandManager.PlaySound("dm_hit_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
-                }
+                    int iOldEnt;
 
-                current_entity_number = iOldEnt;
+                    iOldEnt = current_entity_number;
+
+                    current_entity_number = cg.snap->ps.clientNum;
+                    if (iType == CGM6_NOTIFY_KILL) {
+                        commandManager.PlaySound("dm_kill_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
+                    } else {
+                        commandManager.PlaySound("dm_hit_notify", NULL, CHAN_LOCAL, 2.0, -1, -1, 1);
+                    }
+
+                    current_entity_number = iOldEnt;
+                }
             }
             break;
 

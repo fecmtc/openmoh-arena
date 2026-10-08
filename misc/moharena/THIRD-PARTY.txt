@@ -1,0 +1,25 @@
+OpenMoH Arena - work by others in the optional modern UI
+========================================================
+
+The modern UI is off unless the player turns it on in the launcher. It
+comes from Project: Omaha by JayRewd, a fork of OpenMoHAA published under
+the GNU General Public License, version 2 or later:
+  https://github.com/JayRewd/omaha
+OpenMoH Arena removed parts of it and limits what it may change.
+OpenMoH Arena is not affiliated with or endorsed by Project: Omaha.
+
+Code built into openmohaa.exe for the modern UI. The sources and the full
+license texts are in code/thirdparty of the OpenMoH Arena source code:
+  - TinyXML-2 10.0.0 by Lee Thomason (zlib license)
+  - libtess2 by Mikko Mononen, from the SGI tessellator by Eric Veach.
+    Copyright (C) Silicon Graphics, Inc. SGI Free Software License B,
+    version 2.0: http://oss.sgi.com/projects/FreeB/
+  - stb_truetype and stb_image_write by Sean Barrett (public domain)
+
+Files in main/zz_moharena_ui.pk3:
+  - fonts/Oswald-Medium.ttf and fonts/Oswald-SemiBold.ttf
+    Copyright 2016 The Oswald Project Authors
+    (https://github.com/googlefonts/OswaldFont). SIL Open Font License,
+    version 1.1. The license is fonts/OFL.txt in the same pack.
+  - ui/modern (menus, HUDs and their images) and sound/prom/hitmarkers:
+    from Project: Omaha, as published in its repository.

@@ -21,6 +21,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "cl_ui.h"
+#include "cl_uirender.h"
+#include "cl_messages_host.h"
+#include "cl_killfeed.h"
 #include "../qcommon/localization.h"
 
 Event EV_DMBox_Goin
@@ -136,6 +139,11 @@ void UIDMBox::PostMoveinEvent(void)
 
 void UIDMBox::PostDecayEvent(void)
 {
+    /* Changed in Omaha: modern HUD foreach lifetime owns expiry; capacity trim only. */
+    if (CL_UIR_UseModernHudPack()) {
+        return;
+    }
+
     if (!EventPending(EV_DMBox_Decay)) {
         float       fDelayTime;
         int         iNumLines;
@@ -290,11 +298,19 @@ void UIDMBox::Print(const char *text)
 {
     const char *text1 = text;
 
-    if (m_numitems > 5) {
-        //
-        // Overwrite an item
-        //
-        RemoveTopItem();
+    // Changed in MoH Arena: the modern UI has its own row cap
+    if (MoHArena_ModernUI()) {
+        /* Changed in Omaha: capacity aligned with UIR_HUD_MESSAGES_MAX_ROWS. */
+        if (m_numitems >= UIR_HUD_MESSAGES_MAX_ROWS) {
+            RemoveTopItem();
+        }
+    } else {
+        if (m_numitems > 5) {
+            //
+            // Overwrite an item
+            //
+            RemoveTopItem();
+        }
     }
 
     m_items[m_numitems].flags = 0;
@@ -321,9 +337,30 @@ void UIDMBox::Print(const char *text)
         m_items[m_numitems].color = m_foreground_color;
         m_items[m_numitems].font  = m_font;
     }
+    /* Added in Omaha: Base (protocol < TA) deaths are print→dmbox only; feed kill-feed here.
+     * TA uses printdeathmsg (CL_KillFeed_HandlePrintDeathMsg) then also Printf into dmbox —
+     * skip here to avoid duplicate rows. */
+    // Changed in MoH Arena: the kill feed belongs to the modern UI
+    if (MoHArena_ModernUI() && (m_items[m_numitems].flags & DMBOX_ITEM_FLAG_DEATH) && com_protocol
+        && com_protocol->integer < PROTOCOL_MOHTA_MIN) {
+        CL_KillFeed_HandleDeathPrint(text1, (*text == MESSAGE_CHAT_GREEN) ? 1 : 0);
+    }
 
-    m_items[m_numitems].string =
-        CalculateBreaks(m_items[m_numitems].font, Sys_LV_CL_ConvertString(text1), s_dmboxWidth);
+    // Changed in MoH Arena: the 64 px floor is for the modern UI only
+    if (MoHArena_ModernUI()) {
+        m_items[m_numitems].string =
+            CalculateBreaks(m_items[m_numitems].font, Sys_LV_CL_ConvertString(text1),
+                            s_dmboxWidth < 64.0f ? 64.0f : s_dmboxWidth);
+    } else {
+        m_items[m_numitems].string =
+            CalculateBreaks(m_items[m_numitems].font, Sys_LV_CL_ConvertString(text1), s_dmboxWidth);
+    }
+
+    /* Added in Omaha: monotonic id for hud-messages foreach lifetime. */
+    {
+        static uint64_t s_nextHudMessageId = 1;
+        m_items[m_numitems].stableId = s_nextHudMessageId++;
+    }
 
     m_numitems++;
     VerifyBoxOut();
@@ -377,9 +414,68 @@ void UIDMBox::Draw(void)
     HandleBoxMoving();
 
     if (!m_numitems) {
+        if (CL_UIR_UseModernHudPack()) {
+            /* Fixed in Omaha: only publish an empty snapshot when rows were present.
+             * Calling Clear+NotifyChanged every idle frame bumped collection revision
+             * and forced classic HUD foreach/layout thrash. */
+            if (UIR_HudMessages_GetRowCount() > 0) {
+                UIR_HudMessages_Clear();
+                UIR_HudMessages_NotifyChanged();
+            }
+            /* Added in Omaha: chat-only collection mirrors mixed clear. */
+            if (UIR_HudChat_GetRowCount() > 0) {
+                UIR_HudChat_Clear();
+                UIR_HudChat_NotifyChanged();
+            }
+        }
         //
         // Nothing to show
         //
+        return;
+    }
+
+    /* Added in Omaha: modern HUD pack paints chat via hud-messages collection. */
+    if (CL_UIR_UseModernHudPack()) {
+        uir_hud_message_input_t row;
+
+        if (!m_numitems) {
+            if (UIR_HudMessages_GetRowCount() > 0) {
+                UIR_HudMessages_Clear();
+                UIR_HudMessages_NotifyChanged();
+            }
+            if (UIR_HudChat_GetRowCount() > 0) {
+                UIR_HudChat_Clear();
+                UIR_HudChat_NotifyChanged();
+            }
+            return;
+        }
+
+        alphaScale = 0.8f;
+        if (cge) {
+            alphaScale = static_cast<float>(1.0 - cge->CG_GetObjectiveAlpha());
+        }
+
+        UIR_HudMessages_Clear();
+        UIR_HudMessages_SetAlphaScale(alphaScale);
+        UIR_HudChat_Clear();
+        UIR_HudChat_SetAlphaScale(alphaScale);
+        for (i = 0; i < m_numitems; i++) {
+            std::memset(&row, 0, sizeof(row));
+            row.text = m_items[i].string.c_str();
+            row.colorR = m_items[i].color.r;
+            row.colorG = m_items[i].color.g;
+            row.colorB = m_items[i].color.b;
+            row.colorA = m_items[i].color.a;
+            row.bold = (m_items[i].flags & DMBOX_ITEM_FLAG_BOLD) ? 1 : 0;
+            row.stableId = m_items[i].stableId;
+            UIR_HudMessages_AddRow(&row);
+            /* Added in Omaha: hud-chat excludes death/kill lines. */
+            if (!(m_items[i].flags & DMBOX_ITEM_FLAG_DEATH)) {
+                UIR_HudChat_AddRow(&row);
+            }
+        }
+        UIR_HudMessages_NotifyChanged();
+        UIR_HudChat_NotifyChanged();
         return;
     }
 
@@ -412,6 +508,24 @@ void UIDMBox::Draw(void)
             break;
         }
     }
+}
+
+void UIDMBox::Display(const UIRect2D& drawframe, float parent_alpha)
+{
+    /* Added in Omaha: Phase 1 — modern path only feeds hud collections; Set2DWindow is wasted. */
+    if (CL_UIR_UseModernHudPack()) {
+        if (!isEnabled()) {
+            lastShowTime = -1;
+            return;
+        }
+        if (!m_enabledCvar.length() && !IsVisible()) {
+            return;
+        }
+        m_local_alpha = m_alpha * parent_alpha;
+        Draw();
+        return;
+    }
+    UIWidget::Display(drawframe, parent_alpha);
 }
 
 void UIDMBox::setRealShow(bool b)

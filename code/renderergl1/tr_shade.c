@@ -1836,6 +1836,12 @@ void RB_EndSurface( void ) {
 		tess.xyz[SHADER_MAX_VERTEXES - 1][0] = 0;
 	}
 
+	// Added in MoH Arena: the UI buffers only exist with the modern UI.
+	if ( R_ModernUI() ) {
+		/* Fixed in Omaha: tess draws use client arrays; never inherit the UI batch VBO/IBO. */
+		RE_UI2D_ReleaseBuffersForClientArrays();
+	}
+
 	if ( tess.shader == tr.shadowShader ) {
 		RB_ComputeShadowVolume();
 		return;

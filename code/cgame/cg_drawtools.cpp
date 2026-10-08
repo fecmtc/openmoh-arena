@@ -24,6 +24,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // Some tools used to drawing 2d stuff
 
 #include "cg_local.h"
+#include "cg_hitmarker.h"
+
+#include <cstring>
 
 /*
 ================
@@ -614,6 +617,15 @@ void CG_DrawZoomOverlay()
             } else {
                 zoomType = 0;
             }
+        } else if (CG_ModernUI() && !cg.snap->ps.stats[STAT_INZOOM] && CG_SpectateFP_InZoom()
+                   && CG_SpectateFP_ZoomFov() <= 30) {
+            // Added in MoH Arena: the zoom of the player followed in first-person spectate,
+            //  which belongs to the modern UI
+            if (!Q_stricmp(weaponstring, "KAR98 - Sniper")) {
+                zoomType = 1;
+            } else {
+                zoomType = 0;
+            }
         } else {
             bDrawOverlay = qfalse;
         }
@@ -1156,6 +1168,23 @@ void CG_UpdateCountdown()
     if (strcmp(ui_timemessage->string, message)) {
         cgi.Cvar_Set("ui_timemessage", message);
     }
+
+    // Changed in MoH Arena: the seconds for the modern HUD are worked out and written in the modern UI only
+    if (CG_ModernUI()) {
+        char secondsBuf[32];
+
+        secondsBuf[0] = '\0';
+        if (cg.matchStartTime != -1 && cgs.gametype != GT_LIBERATION) {
+            int iSecondsLeft = (cgs.matchEndTime - cg.time) / 1000;
+
+            if (iSecondsLeft >= 0) {
+                /* Added in Omaha: total seconds left for modern HUD binds. */
+                Com_sprintf(secondsBuf, sizeof(secondsBuf), "%d", iSecondsLeft);
+            }
+        }
+        /* Added in Omaha: scalar seconds provider (empty when no active countdown). */
+        CG_HudSetCached("ui_om_hud_time_seconds", secondsBuf);
+    }
 }
 
 static void CG_RemoveStopwatch()
@@ -1171,6 +1200,10 @@ void CG_DrawStopwatch()
 
     if (!cg_hud->integer) {
         CG_RemoveStopwatch();
+        return;
+    }
+
+    if (CG_UseModernHudPack()) {
         return;
     }
 
@@ -1226,6 +1259,10 @@ void CG_DrawInstantMessageMenu()
     float     w, h;
     float     x, y;
     qhandle_t handle;
+
+    if (CG_UseModernHudPack()) {
+        return;
+    }
 
     if (!cg.iInstaMessageMenu) {
         return;
@@ -1619,13 +1656,495 @@ void CG_DrawVote()
 
 /*
 ==============
+CG_ModernUI
+
+Added in MoH Arena: qtrue when the game was started with the modern UI.
+==============
+*/
+qboolean CG_ModernUI(void)
+{
+    return ui_legacy && !ui_legacy->integer;
+}
+
+/*
+==============
+CG_UseModernHudPack
+==============
+*/
+qboolean CG_UseModernHudPack(void)
+{
+    if (!CG_ModernUI()) {
+        return qfalse;
+    }
+    if (ui_om_hud && ui_om_hud->string[0] && !Q_stricmp(ui_om_hud->string, "legacy")) {
+        return qfalse;
+    }
+    return qtrue;
+}
+
+static void CG_SyncModernObjectives(void)
+{
+    int i;
+    int iCurrentObjective;
+
+    if (!cgi.UIR_Objectives_Clear || !cgi.UIR_Objectives_AddRow || !cgi.UIR_Objectives_NotifyChanged) {
+        return;
+    }
+
+    for (i = CS_OBJECTIVES; i < CS_OBJECTIVES + MAX_OBJECTIVES; ++i) {
+        CG_ProcessConfigString(i, qfalse);
+    }
+
+    iCurrentObjective = atoi(CG_ConfigString(CS_CURRENT_OBJECTIVE));
+    cgi.UIR_Objectives_Clear();
+    if (cgi.UIR_Objectives_SetAlpha) {
+        cgi.UIR_Objectives_SetAlpha(cg.ObjectivesCurrentAlpha);
+    }
+
+    for (i = 0; i < MAX_OBJECTIVES; ++i) {
+        uir_objective_row_t row;
+
+        if ((cg.Objectives[i].flags == OBJ_FLAG_NONE) || (cg.Objectives[i].flags & OBJ_FLAG_HIDDEN)) {
+            continue;
+        }
+
+        std::memset(&row, 0, sizeof(row));
+        Q_strncpyz(row.text, cg.Objectives[i].text, sizeof(row.text));
+        row.hidden = 0;
+        row.completed = (cg.Objectives[i].flags & OBJ_FLAG_COMPLETED) ? 1 : 0;
+        row.current = (cg.Objectives[i].flags & OBJ_FLAG_CURRENT) ? 1 : 0;
+        row.highlight = (i == iCurrentObjective && !(cg.Objectives[i].flags & OBJ_FLAG_COMPLETED)) ? 1 : 0;
+        cgi.UIR_Objectives_AddRow(&row);
+    }
+
+    cgi.UIR_Objectives_NotifyChanged();
+}
+
+/* Added in Omaha: Phase 4.5 — skip unchanged ui_om_hud_* Cvar_Set traffic. */
+#define CG_HUD_PUSH_CACHE_SLOTS 64
+
+typedef struct {
+    const char *name;
+    char        value[256];
+    qboolean    valid;
+} cgHudPushSlot_t;
+
+static cgHudPushSlot_t s_hudPushCache[CG_HUD_PUSH_CACHE_SLOTS];
+static int             s_hudPushCacheLastEnabled = -1;
+
+void CG_HudPushCacheReset(void)
+{
+    memset(s_hudPushCache, 0, sizeof(s_hudPushCache));
+    s_hudPushCacheLastEnabled = -1;
+}
+
+static unsigned CG_HudPushNameHash(const char *name)
+{
+    unsigned hash = 2166136261u;
+    for (; name && *name; ++name) {
+        hash ^= (unsigned char)*name;
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static cgHudPushSlot_t *CG_HudPushFindSlot(const char *name, qboolean create)
+{
+    unsigned     hash;
+    unsigned     i;
+    unsigned     n;
+
+    if (!name) {
+        return NULL;
+    }
+    hash = CG_HudPushNameHash(name);
+    for (n = 0; n < CG_HUD_PUSH_CACHE_SLOTS; ++n) {
+        i = (hash + n) % CG_HUD_PUSH_CACHE_SLOTS;
+        if (!s_hudPushCache[i].valid) {
+            if (!create) {
+                return NULL;
+            }
+            s_hudPushCache[i].name    = name;
+            s_hudPushCache[i].valid   = qtrue;
+            s_hudPushCache[i].value[0] = '\0';
+            return &s_hudPushCache[i];
+        }
+        /* Prefer pointer identity (call sites use string literals). */
+        if (s_hudPushCache[i].name == name || !strcmp(s_hudPushCache[i].name, name)) {
+            return &s_hudPushCache[i];
+        }
+    }
+    return NULL;
+}
+
+void CG_HudSetCached(const char *name, const char *value)
+{
+    cgHudPushSlot_t *slot;
+
+    if (!name) {
+        return;
+    }
+    if (!value) {
+        value = "";
+    }
+    if (!cg_hud_push_cache) {
+        cgi.Cvar_Set(name, value);
+        return;
+    }
+    if (s_hudPushCacheLastEnabled != cg_hud_push_cache->integer) {
+        CG_HudPushCacheReset();
+        s_hudPushCacheLastEnabled = cg_hud_push_cache->integer;
+    }
+    if (!cg_hud_push_cache->integer) {
+        cgi.Cvar_Set(name, value);
+        return;
+    }
+    slot = CG_HudPushFindSlot(name, qtrue);
+    if (slot && slot->valid && !strcmp(slot->value, value)) {
+        return;
+    }
+    cgi.Cvar_Set(name, value);
+    if (slot) {
+        Q_strncpyz(slot->value, value, sizeof(slot->value));
+    }
+}
+
+void CG_SyncModernHudCvars(void)
+{
+    char        buf[512];
+    const char *message;
+    int         seconds;
+    int         iFraction;
+    int         percentYes;
+    int         percentNo;
+    int         percentUndecided;
+
+    // Added in MoH Arena: there is nothing to publish without a modern HUD
+    if (!CG_UseModernHudPack()) {
+        return;
+    }
+
+    CG_UpdateCountdown();
+    CG_SyncModernObjectives();
+
+    if (cgs.voteTime) {
+        seconds = (30000 - (cg.time - cgs.voteTime)) / 1000 + 1;
+        if (seconds < 0) {
+            seconds = 0;
+        }
+        Com_sprintf(
+            buf,
+            sizeof(buf),
+            "%s: %s",
+            cgi.LV_ConvertString("Vote Running"),
+            cgs.voteString[0] ? cgs.voteString : ""
+        );
+        CG_HudSetCached("ui_om_hud_vote_text", buf);
+        Com_sprintf(buf, sizeof(buf), "%d", seconds);
+        CG_HudSetCached("ui_om_hud_vote_seconds", buf);
+
+        percentYes =
+            cgs.numVotesYes * 100 / (cgs.numUndecidedVotes + cgs.numVotesNo + cgs.numVotesYes);
+        percentNo = cgs.numVotesNo * 100 / (cgs.numUndecidedVotes + cgs.numVotesNo + cgs.numVotesYes);
+        percentUndecided =
+            cgs.numUndecidedVotes * 100 / (cgs.numUndecidedVotes + cgs.numVotesNo + cgs.numVotesYes);
+        Com_sprintf(
+            buf,
+            sizeof(buf),
+            "%s: %isec  %s: %i%%  %s: %i%%  %s: %i%%",
+            cgi.LV_ConvertString("Time"),
+            seconds,
+            cgi.LV_ConvertString("Yes"),
+            percentYes,
+            cgi.LV_ConvertString("No"),
+            percentNo,
+            cgi.LV_ConvertString("Undecided"),
+            percentUndecided
+        );
+        CG_HudSetCached("ui_om_hud_vote_stats", buf);
+
+        if (cg.snap && !cg.snap->ps.voted) {
+            CG_HudSetCached("ui_om_hud_vote_prompt", cgi.LV_ConvertString("Vote now, it's your patriotic duty!"));
+            CG_HudSetCached("ui_om_hud_vote_keys",
+                cgi.LV_ConvertString(va("Press %s to vote yes, and %s to vote no.", "F1", "F2"))
+            );
+        } else {
+            CG_HudSetCached("ui_om_hud_vote_prompt", "");
+            CG_HudSetCached("ui_om_hud_vote_keys", "");
+        }
+    } else {
+        CG_HudSetCached("ui_om_hud_vote_text", "");
+        CG_HudSetCached("ui_om_hud_vote_seconds", "0");
+        CG_HudSetCached("ui_om_hud_vote_stats", "");
+        CG_HudSetCached("ui_om_hud_vote_prompt", "");
+        CG_HudSetCached("ui_om_hud_vote_keys", "");
+    }
+
+    message = ui_timemessage ? ui_timemessage->string : "";
+    CG_HudSetCached("ui_om_hud_time_message", message ? message : "");
+
+    if (cg.snap && cg.snap->ps.stats[STAT_INFOCLIENT] >= 0) {
+        const int         iClientNum = cg.snap->ps.stats[STAT_INFOCLIENT];
+        const char       *pszClientInfo = CG_ConfigString(iClientNum + CS_PLAYERS);
+        const char       *pszName = Info_ValueForKey(pszClientInfo, "name");
+        qboolean          friendly = qfalse;
+
+        CG_HudSetCached("ui_om_hud_info_name", pszName ? pszName : "");
+        Com_sprintf(buf, sizeof(buf), "%d", cg.snap->ps.stats[STAT_INFOCLIENT_HEALTH]);
+        CG_HudSetCached("ui_om_hud_info_health", buf);
+        Com_sprintf(buf, sizeof(buf), "%d", cg.clientinfo[iClientNum].team);
+        CG_HudSetCached("ui_om_hud_info_team", buf);
+        if (cgs.gametype > GT_FFA && cg.snap->ps.stats[STAT_TEAM] > 0 &&
+            cg.clientinfo[iClientNum].team == cg.snap->ps.stats[STAT_TEAM]) {
+            friendly = qtrue;
+        }
+        CG_HudSetCached("ui_om_hud_info_friendly", friendly ? "1" : "0");
+    } else {
+        CG_HudSetCached("ui_om_hud_info_name", "");
+        CG_HudSetCached("ui_om_hud_info_health", "0");
+        CG_HudSetCached("ui_om_hud_info_team", "0");
+        CG_HudSetCached("ui_om_hud_info_friendly", "0");
+    }
+
+    if (cg.snap && cg.snap->ps.stats[STAT_ATTACKERCLIENT] >= 0) {
+        const int   iClientNum = cg.snap->ps.stats[STAT_ATTACKERCLIENT];
+        const char *pszClientInfo = CG_ConfigString(CS_PLAYERS + iClientNum);
+        const char *pszName = Info_ValueForKey(pszClientInfo, "name");
+        qboolean    friendly = qfalse;
+
+        CG_HudSetCached("ui_om_hud_attacker_name", pszName ? pszName : "");
+        Com_sprintf(buf, sizeof(buf), "%d", cg.clientinfo[iClientNum].team);
+        CG_HudSetCached("ui_om_hud_attacker_team", buf);
+        if (cgs.gametype > GT_FFA && cg.snap->ps.stats[STAT_TEAM] > 0 &&
+            cg.clientinfo[iClientNum].team == cg.snap->ps.stats[STAT_TEAM]) {
+            friendly = qtrue;
+        }
+        CG_HudSetCached("ui_om_hud_attacker_friendly", friendly ? "1" : "0");
+    } else {
+        CG_HudSetCached("ui_om_hud_attacker_name", "");
+        CG_HudSetCached("ui_om_hud_attacker_team", "0");
+        CG_HudSetCached("ui_om_hud_attacker_friendly", "0");
+    }
+
+    if (cg.snap && (cg.predicted_player_state.pm_flags & PMF_SPECTATING)) {
+        int  iKey1, iKey2;
+        const char *pszString;
+
+        /* Added in Omaha: "Following name" above spectator prompts while chase-cam. */
+        if ((cg.predicted_player_state.pm_flags & PMF_CAMERA_VIEW)
+            && cg.snap->ps.stats[STAT_INFOCLIENT] >= 0) {
+            const int   iClientNum = cg.snap->ps.stats[STAT_INFOCLIENT];
+            const char *pszName = cg.clientinfo[iClientNum].name;
+
+            Com_sprintf(buf, sizeof(buf), "%s %s", cgi.LV_ConvertString("Following"), pszName ? pszName : "");
+            CG_HudSetCached("ui_om_hud_following_text", buf);
+            /* Added in Omaha: bare name + team token for modern HUD (health cluster). */
+            CG_HudSetCached("ui_om_hud_following_name", pszName ? pszName : "");
+            if (cg.clientinfo[iClientNum].team == TEAM_AXIS) {
+                CG_HudSetCached("ui_om_hud_following_team", "axis");
+            } else if (cg.clientinfo[iClientNum].team == TEAM_ALLIES) {
+                CG_HudSetCached("ui_om_hud_following_team", "allies");
+            } else {
+                CG_HudSetCached("ui_om_hud_following_team", "");
+            }
+        } else {
+            CG_HudSetCached("ui_om_hud_following_text", "");
+            CG_HudSetCached("ui_om_hud_following_name", "");
+            CG_HudSetCached("ui_om_hud_following_team", "");
+        }
+
+        if (cg_protocol >= PROTOCOL_MOHTA_MIN) {
+            if (cg.snap->ps.stats[STAT_TEAM] != TEAM_ALLIES && cg.snap->ps.stats[STAT_TEAM] != TEAM_AXIS) {
+                cgi.Key_GetKeysForCommand("+attackprimary", &iKey1, &iKey2);
+                pszString = cgi.LV_ConvertString(
+                    va("Press Fire(%s) to join the battle!", cgi.Key_KeynumToBindString(iKey1))
+                );
+                CG_HudSetCached("ui_om_hud_spectator_text", pszString);
+            } else if (cg.predicted_player_state.pm_flags & PMF_CAMERA_VIEW) {
+                cgi.Key_GetKeysForCommand("+use", &iKey1, &iKey2);
+                pszString = cgi.LV_ConvertString(
+                    va("Press Use(%s) to enter free spectate mode.", cgi.Key_KeynumToBindString(iKey1))
+                );
+                CG_HudSetCached("ui_om_hud_spectator_text", pszString);
+            } else {
+                cgi.Key_GetKeysForCommand("+use", &iKey1, &iKey2);
+                pszString = cgi.LV_ConvertString(
+                    va("Press Use(%s) to enter player following spectate mode.", cgi.Key_KeynumToBindString(iKey1))
+                );
+                CG_HudSetCached("ui_om_hud_spectator_text", pszString);
+            }
+        } else {
+            cgi.Key_GetKeysForCommand("+use", &iKey1, &iKey2);
+            if (cg.predicted_player_state.pm_flags & PMF_CAMERA_VIEW) {
+                pszString = cgi.LV_ConvertString(
+                    va("Press Use(%s) to follow a different player.", cgi.Key_KeynumToBindString(iKey1))
+                );
+            } else {
+                pszString = cgi.LV_ConvertString(
+                    va("Press Use(%s) to follow a player.", cgi.Key_KeynumToBindString(iKey1))
+                );
+            }
+            CG_HudSetCached("ui_om_hud_spectator_text", pszString);
+        }
+    } else {
+        CG_HudSetCached("ui_om_hud_spectator_text", "");
+        CG_HudSetCached("ui_om_hud_following_text", "");
+        CG_HudSetCached("ui_om_hud_following_name", "");
+        CG_HudSetCached("ui_om_hud_following_team", "");
+    }
+
+    Com_sprintf(buf, sizeof(buf), "%d", cg.iInstaMessageMenu);
+    CG_HudSetCached("ui_om_hud_im_menu", buf);
+    if (cg.iInstaMessageMenu > 0) {
+        Com_sprintf(buf, sizeof(buf), "textures/hud/instamsg_group_%c", cg.iInstaMessageMenu + 96);
+        CG_HudSetCached("ui_om_hud_im_image", buf);
+    } else if (cg.iInstaMessageMenu < 0) {
+        CG_HudSetCached("ui_om_hud_im_image", "textures/hud/instamsg_main");
+    } else {
+        CG_HudSetCached("ui_om_hud_im_image", "");
+    }
+
+    CG_HudSetCached("ui_om_hud_pause_icon", paused->integer ? "1" : "0");
+    if (cg.predicted_player_state.pm_flags & PMF_LEVELEXIT) {
+        CG_HudSetCached("ui_om_hud_level_exit_icon", ((cg.time >> 9) & 1) ? "0" : "1");
+    } else {
+        CG_HudSetCached("ui_om_hud_level_exit_icon", "0");
+    }
+
+    /*
+     * Added in Omaha: modern HUD only (ui_om_hud_*). Pad normal stopwatch by 250ms so the
+     * plant bar outlasts retail script wait.0.1 skew vs wall-clock dial end. Leaves
+     * ui_legacy CG_DrawStopwatch / ui_stopwatch untouched.
+     */
+    static const int kOmStopwatchPadMs = 250;
+    iFraction                          = 0;
+    if (cgi.stopWatch->iStartTime && cgi.stopWatch->iStartTime < cgi.stopWatch->iEndTime
+        && cg.ObjectivesCurrentAlpha < 0.02f && (!cg.snap || cg.snap->ps.stats[STAT_HEALTH] > 0)) {
+        if (cgi.stopWatch->eType >= SWT_FUSE_WET) {
+            if (cgi.stopWatch->iEndTime > cg.time) {
+                iFraction = cgi.stopWatch->iEndTime - cgi.stopWatch->iStartTime;
+            }
+        } else if (cgi.stopWatch->iEndTime + kOmStopwatchPadMs > cg.time) {
+            iFraction = cgi.stopWatch->iEndTime + kOmStopwatchPadMs - cg.time;
+        }
+    }
+    Com_sprintf(buf, sizeof(buf), "%d", iFraction);
+    CG_HudSetCached("ui_om_hud_stopwatch_ms", buf);
+    /* Changed in Omaha: clear type when inactive so idle dial cannot linger. */
+    if (iFraction > 0) {
+        Com_sprintf(buf, sizeof(buf), "%d", cgi.stopWatch->eType);
+        CG_HudSetCached("ui_om_hud_stopwatch_type", buf);
+        const int seconds = (iFraction + 999) / 1000;
+        Com_sprintf(buf, sizeof(buf), "%d", seconds);
+        CG_HudSetCached("ui_om_hud_stopwatch_text", buf);
+        /* Added in Omaha: remaining/total for modern plant progress bar (1 → 0). */
+        {
+            const int rawTotalMs = cgi.stopWatch->iEndTime - cgi.stopWatch->iStartTime;
+            const int totalMs =
+                (cgi.stopWatch->eType >= SWT_FUSE_WET) ? rawTotalMs : (rawTotalMs + kOmStopwatchPadMs);
+            float frac = 0.0f;
+            if (totalMs > 0) {
+                if (cgi.stopWatch->eType >= SWT_FUSE_WET) {
+                    frac = 1.0f;
+                } else {
+                    frac = (float)iFraction / (float)totalMs;
+                    if (frac < 0.0f) {
+                        frac = 0.0f;
+                    } else if (frac > 1.0f) {
+                        frac = 1.0f;
+                    }
+                }
+            }
+            Com_sprintf(buf, sizeof(buf), "%.4f", frac);
+            CG_HudSetCached("ui_om_hud_stopwatch_frac", buf);
+        }
+    } else {
+        CG_HudSetCached("ui_om_hud_stopwatch_type", "-1");
+        CG_HudSetCached("ui_om_hud_stopwatch_text", "");
+        CG_HudSetCached("ui_om_hud_stopwatch_frac", "0");
+    }
+
+    /* Changed in Omaha: match retail MP score/fraglimit mutual exclusion (any MP gametype). */
+    if (cgs.gametype && cgs.fraglimit) {
+        Com_sprintf(buf, sizeof(buf), "%s %d", cgi.LV_ConvertString("Frag Limit:"), cgs.fraglimit);
+        CG_HudSetCached("ui_om_hud_frag_limit_text", buf);
+        CG_HudSetCached("ui_om_hud_score_text", "");
+    } else if (cgs.gametype && cg.snap) {
+        CG_HudSetCached("ui_om_hud_frag_limit_text", "");
+        Com_sprintf(
+            buf,
+            sizeof(buf),
+            "%s: %d ( %d )",
+            cgi.LV_ConvertString("Score"),
+            cg.snap->ps.stats[STAT_KILLS],
+            cg.snap->ps.stats[STAT_HIGHEST_SCORE]
+        );
+        CG_HudSetCached("ui_om_hud_score_text", buf);
+    } else {
+        CG_HudSetCached("ui_om_hud_frag_limit_text", "");
+        CG_HudSetCached("ui_om_hud_score_text", "");
+    }
+
+    /*
+     * Added in Omaha: modern HUD Allied|timer|Axis / self|timer|leader strip.
+     * FFA uses STAT_KILLS / STAT_HIGHEST_SCORE. Team modes cache both teams from
+     * scoreboard headers (silent score refresh) and keep own team live from STAT_KILLS.
+     */
+    if (!cgs.gametype || !cg.snap) {
+        CG_HudSetCached("ui_om_hud_allied_score", "");
+        CG_HudSetCached("ui_om_hud_axis_score", "");
+        CG_HudSetCached("ui_om_hud_score_self", "");
+        CG_HudSetCached("ui_om_hud_score_leader", "");
+    } else if (cgs.gametype == GT_FFA) {
+        CG_HudSetCached("ui_om_hud_allied_score", "");
+        CG_HudSetCached("ui_om_hud_axis_score", "");
+        Com_sprintf(buf, sizeof(buf), "%d", cg.snap->ps.stats[STAT_KILLS]);
+        CG_HudSetCached("ui_om_hud_score_self", buf);
+        Com_sprintf(buf, sizeof(buf), "%d", cg.snap->ps.stats[STAT_HIGHEST_SCORE]);
+        CG_HudSetCached("ui_om_hud_score_leader", buf);
+    } else {
+        const int team  = cg.snap->ps.stats[STAT_TEAM];
+        const int score = cg.snap->ps.stats[STAT_KILLS];
+
+        CG_HudSetCached("ui_om_hud_score_self", "");
+        CG_HudSetCached("ui_om_hud_score_leader", "");
+        CG_RequestHudTeamScoresSilent();
+        if (team == TEAM_ALLIES) {
+            Com_sprintf(buf, sizeof(buf), "%d", score);
+            CG_HudSetCached("ui_om_hud_allied_score", buf);
+        } else if (team == TEAM_AXIS) {
+            Com_sprintf(buf, sizeof(buf), "%d", score);
+            CG_HudSetCached("ui_om_hud_axis_score", buf);
+        }
+    }
+}
+
+/*
+==============
 CG_Draw2D
 ==============
 */
 void CG_Draw2D(void)
 {
+    if (cg_hud->integer && CG_UseModernHudPack()) {
+        CG_SyncModernHudCvars();
+        /*
+         * Zoom overlay is drawn in View3D before the modern HUD layer so PK3
+         * scopes sit under chrome (retail order).
+         */
+        CG_HudDrawElements();
+        CG_DrawLagometer();
+        CG_DrawHitmarker(); /* Added in Omaha: under crosshair layer */
+        CG_DrawCrosshair();
+        return;
+    }
+
     CG_UpdateCountdown();
-    CG_DrawZoomOverlay();
+    // Changed in MoH Arena: under a HUD of the modern UI the client has drawn the
+    // zoom overlay already, so with that HUD hidden it is not drawn a second time
+    if (!CG_UseModernHudPack()) {
+        CG_DrawZoomOverlay();
+    }
     CG_DrawLagometer();
     CG_HudDrawElements();
     CG_DrawObjectives();
@@ -1637,5 +2156,9 @@ void CG_Draw2D(void)
     CG_UpdateAttackerDisplay();
     CG_DrawVote();
     CG_DrawInstantMessageMenu();
+    // Added in MoH Arena: hitmarkers belong to the modern UI
+    if (CG_ModernUI()) {
+        CG_DrawHitmarker(); /* Added in Omaha: under crosshair layer */
+    }
     CG_DrawCrosshair();
 }

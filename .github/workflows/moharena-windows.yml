@@ -5,7 +5,8 @@
 # Windows x86 and x64 builds with the MoH Arena native bridge.
 # Same toolchain and CMake flags as shared-build-windows.yml
 # (renderer linked into the exe), plus MOHARENA=ON.
-# No installer and no arm64.
+# No installer, no arm64 and no test programs.
+# Also builds main/zz_moharena_ui.pk3, the files of the optional modern UI.
 #
 ##########################
 name: "MoH Arena Windows Builds"
@@ -15,6 +16,7 @@ on:
   push:
     branches:
       - 'moharena-native-bridge'
+      - 'moharena-omaha-ui'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -230,6 +232,7 @@ jobs:
         -DUSE_RENDERER_DLOPEN=OFF `
         -DBUILD_RENDERER_GL2=OFF `
         -DMOHARENA=ON `
+        -DBUILD_TESTING=OFF `
         -DPRODUCT_VERSION_STAGE='${{ env.RELEASE_STAGE }}'".Replace("`r", "").Replace("`n", "") >> $env:GITHUB_ENV
 
     - name: Configure CMake
@@ -254,14 +257,24 @@ jobs:
         if (Test-Path ${{github.workspace}}/install/bin) { Copy-Item '${{github.workspace}}/install/bin/*' -Include '*.dll','*.exe','*.pdb' -Destination '${{github.workspace}}/package' }
         if (Test-Path ${{github.workspace}}/install/lib) { Copy-Item '${{github.workspace}}/install/lib/*' -Include '*.dll','*.exe','*.pdb' -Destination '${{github.workspace}}/package' }
 
-    # The license, the written source offer with this build's versions, and the
-    # SHA-256 of every exe and DLL (the launcher accepts only these exes).
+    # The files of the optional modern UI as one pack. The script writes the
+    # same bytes on every system, so both jobs give the same hash.
+    - name: MoH Arena modern UI pack
+      working-directory: ${{github.workspace}}
+      run: |
+        python source/misc/moharena/make_modern_ui_pk3.py --output '${{github.workspace}}/package/main/zz_moharena_ui.pk3'
+        if ($LASTEXITCODE -ne 0) { throw "The modern UI pack was not built" }
+
+    # The license, the written source offer with this build's versions, the
+    # notices for the modern UI, and the SHA-256 of every exe and DLL (the
+    # launcher accepts only these exes) and of the modern UI pack.
     - name: MoH Arena files
       working-directory: ${{github.workspace}}
       run: |
         $Package = '${{github.workspace}}/package'
         if (-not (Test-Path "$Package/openmohaa.exe")) { throw "openmohaa.exe is missing from the package" }
         Copy-Item 'source/COPYING.txt' -Destination $Package
+        Copy-Item 'source/misc/moharena/THIRD-PARTY.txt' -Destination $Package
         $Offer = Get-Content -Raw 'source/misc/moharena/SOURCE-OFFER.txt'
         $Offer += "`nBuild`n"
         $Offer += "  OpenMoH Arena commit: ${{ github.sha }}`n"
@@ -273,9 +286,11 @@ jobs:
         if ($Offer -match 'CONTACT: to be filled in') {
           echo "::warning::SOURCE-OFFER.txt has no contact yet; fill it in before any release."
         }
-        $Hashes = Get-ChildItem -Path "$Package/*" -File -Include '*.exe','*.dll' | Sort-Object Name | ForEach-Object {
+        $Hashes = @(Get-ChildItem -Path "$Package/*" -File -Include '*.exe','*.dll' | Sort-Object Name | ForEach-Object {
           "$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower())  $($_.Name)"
-        }
+        })
+        $Pack = "$Package/main/zz_moharena_ui.pk3"
+        $Hashes += "$((Get-FileHash -Algorithm SHA256 $Pack).Hash.ToLower())  main/zz_moharena_ui.pk3"
         Set-Content -Path "$Package/SHA256SUMS.txt" -Value $Hashes
         echo "### windows-${{ matrix.architecture.name }} SHA-256" >> $env:GITHUB_STEP_SUMMARY
         echo '```' >> $env:GITHUB_STEP_SUMMARY

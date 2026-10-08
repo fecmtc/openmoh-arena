@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+// Added in MoH Arena: the limits of r_picmip and cg_shadows with the modern UI.
+#include "../qcommon/moharena_limits.h"
 
 #include "tr_dsa.h"
 
@@ -1355,7 +1357,12 @@ void R_Register( void )
 	r_picmip = ri.Cvar_Get ("r_picmip", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_roundImagesDown = ri.Cvar_Get ("r_roundImagesDown", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_colorMipLevels = ri.Cvar_Get ("r_colorMipLevels", "0", CVAR_LATCH );
-	ri.Cvar_CheckRange( r_picmip, 0, 16, qtrue );
+	// Changed in MoH Arena: with the modern UI r_picmip stops at MOHARENA_PICMIP_MAX.
+	if ( R_ModernUI() ) {
+		ri.Cvar_CheckRange( r_picmip, 0, MOHARENA_PICMIP_MAX, qtrue );
+	} else {
+		ri.Cvar_CheckRange( r_picmip, 0, 16, qtrue );
+	}
 	r_detailTextures = ri.Cvar_Get( "r_detailtextures", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_colorbits = ri.Cvar_Get( "r_colorbits", "0", CVAR_ARCHIVE | CVAR_LATCH );
@@ -1444,7 +1451,13 @@ void R_Register( void )
 	// temporary latched variables that can only change over a restart
 	//
 	r_displayRefresh = ri.Cvar_Get( "r_displayRefresh", "0", CVAR_LATCH );
-	ri.Cvar_CheckRange( r_displayRefresh, 0, 200, qtrue );
+	// Changed in MoH Arena: the wider range is only used with the modern UI.
+	if ( R_ModernUI() ) {
+		/* Changed in Omaha: allow modern panel rates (240/360+); was legacy 0–200. */
+		ri.Cvar_CheckRange( r_displayRefresh, 0, 1000, qtrue );
+	} else {
+		ri.Cvar_CheckRange( r_displayRefresh, 0, 200, qtrue );
+	}
 	r_fullbright = ri.Cvar_Get ("r_fullbright", "0", CVAR_LATCH|CVAR_CHEAT );
 	r_mapOverBrightBits = ri.Cvar_Get ("r_mapOverBrightBits", "2", CVAR_LATCH );
 	r_intensity = ri.Cvar_Get ("r_intensity", "1", CVAR_LATCH );
@@ -1533,6 +1546,11 @@ void R_Register( void )
 	r_lockpvs = ri.Cvar_Get ("r_lockpvs", "0", CVAR_CHEAT);
 	r_noportals = ri.Cvar_Get ("r_noportals", "0", CVAR_CHEAT);
 	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	// Added in MoH Arena: with the modern UI cg_shadows stops at MOHARENA_SHADOWS_MAX.
+	//  The original UI sets no range.
+	if ( R_ModernUI() ) {
+		ri.Cvar_CheckRange( r_shadows, 0, MOHARENA_SHADOWS_MAX, qtrue );
+	}
 
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE);
 
@@ -1983,6 +2001,8 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.RegisterSkin = RE_RegisterSkin;
 	re.RegisterShader = RE_RegisterShader;
 	re.RegisterShaderNoMip = RE_RegisterShaderNoMip;
+	re.CreateUIAtlas = RE_CreateUIAtlas;
+	re.UpdateUIAtlas = RE_UpdateUIAtlas;
 	re.LoadWorld = RE_LoadWorldMap;
 	re.SetWorldVisData = RE_SetWorldVisData;
 	re.EndRegistration = RE_EndRegistration;

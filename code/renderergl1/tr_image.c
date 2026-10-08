@@ -2455,6 +2455,11 @@ static void R_LoadImage(const char* name, byte** pic, int* width, int* height, q
 			LoadJPG(name, pic, width, height);
 			*piMipmapsAvailable = 1;
         }
+		// Changed in MoH Arena: a .png is only loaded with the modern UI.
+		else if (R_ModernUI() && !Q_stricmp(name + len - 4, ".png")) {
+			R_LoadPNG(name, pic, width, height);
+			*piMipmapsAvailable = 1;
+		}
 		else if (!Q_stricmp(name + len - 4, ".gst")) {
 			LoadGHOST(name, pic, width, height);
 			*piMipmapsAvailable = 0;

@@ -1,0 +1,334 @@
+<ui-library version="1">
+		<templates>
+			<template id="route-outlet">
+				<props>
+					<prop name="source" type="string" required="true"/>
+					<prop name="bind" type="binding" required="true"/>
+				</props>
+				<container type="vertical" width="100%" height="100%"
+				           source="{template.source}" bind="{template.bind}">
+					<foreach mode="selected" type="vertical" width="100%" height="100%">
+						<use template="{item.field.template}" width="100%" height="100%"/>
+					</foreach>
+				</container>
+			</template>
+
+			<template id="route-tab-bar">
+				<foreach mode="all" type="horizontal" width="100%" height="100%" gap="0" valign="center">
+					<button set-index="{item.index}"
+					        width="auto" height="100%" padding="0 20px" shape="skew-rect"
+					        skewl="12px" skewr="12px"
+					        fill="{item.selected ? var.color-accent : var.fill-transparent}"
+					        hoverfill="{var.fill-hover-ghost}"
+					        color="{var.color-white}"
+					        font="control" font-size="{var.text-control}" letter-spacing="2px">{item.label}</button>
+					<container width="2px" height="100%" margin="0 -6px 0 -6px" fill="{var.fill-divider-skew}"
+					           shape="angled-line" offset="12px" heightfactor="0.64"
+					           visible="{!item.last}"/>
+				</foreach>
+			</template>
+
+			<template id="route-tab-bar-dim">
+				<foreach mode="all" type="horizontal" width="100%" height="100%" gap="0" valign="center">
+					<button set-index="{item.index}"
+					        width="auto" height="100%" padding="0 20px" shape="skew-rect"
+					        skewl="12px" skewr="12px"
+					        fill="{item.selected ? var.color-accent : var.fill-transparent}"
+					        hoverfill="{item.selected ? var.fill-transparent : var.fill-hover-ghost}"
+					        color="{item.selected ? var.color-white : var.color-muted}"
+					        font="control" font-size="{var.text-control}" letter-spacing="2px">{item.label}</button>
+					<container width="2px" height="100%" margin="0 -6px 0 -6px" fill="{var.fill-divider-skew}"
+					           shape="angled-line" offset="12px" heightfactor="0.64"
+					           visible="{!item.last}"/>
+				</foreach>
+			</template>
+
+			<template id="route-tab-bar-header">
+				<foreach mode="all" type="horizontal" width="auto" height="100%" gap="0" valign="center">
+					<button set-index="{item.index}"
+					        width="auto" height="100%" padding="0 20px" shape="skew-rect"
+					        skewl="12px" skewr="12px"
+					        fill="{item.selected ? var.color-accent : var.fill-transparent}"
+					        hoverfill="{item.selected ? var.color-accent-hover : var.fill-hover-ghost}"
+					        color="{item.selected ? var.color-white : var.color-muted}"
+					        font="control" font-size="{var.text-tab}" letter-spacing="2px">{item.label}</button>
+					<container width="2px" height="100%" margin="0 -6px 0 -6px" fill="{var.fill-divider-skew}"
+					           shape="angled-line" offset="12px" heightfactor="0.64"
+					           visible="{!item.last}"/>
+				</foreach>
+			</template>
+
+			<template id="scrollbar-default">
+				<scrollbar axis="vertical" width="6px">
+					<track fill="{var.fill-input}" shape="rectangle"/>
+					<thumb width="6px" halign="center" valign="start"
+					       fill="{var.color-accent}" hoverfill="{var.color-accent-hover}" pressed-fill="{var.color-accent-pressed}"
+					       shape="rectangle"/>
+				</scrollbar>
+			</template>
+			
+			<template id="settings-slider">
+				<props>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="min" type="number" required="true"/>
+					<prop name="max" type="number" required="true"/>
+					<prop name="step" type="number" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+					<prop name="width" type="string" required="false" default="242px"/>
+				</props>
+				<container type="horizontal" width="{template.width}" height="36px"
+				           gap="2px" valign="center">
+					<slider width="fill" height="100%"
+					        bind="{template.bind}" min="{template.min}" max="{template.max}" step="{template.step}"
+					        commit="{template.commit}" value-type="{template.value-type}" stroke="{var.stroke-border}" stroke-width="1px">
+						<track height="100%" fill="{var.fill-control}" shape="rectangle" radius="0px"/>
+						<range fill="{var.fill-divider}" shape="rectangle" radius="0px"/>
+						<thumb width="3px" height="100%" fill="{var.color-accent}" hoverfill="{var.color-accent-hover}"
+						       pressed-fill="{var.color-accent-pressed}" shape="rectangle" radius="0px"/>
+					</slider>
+					<input type="number" width="56px" height="100%"
+					       bind="{template.bind}" min="{template.min}" max="{template.max}" step="{template.step}"
+					       commit="{template.commit}" value-type="{template.value-type}" fill="{var.fill-control}"
+					       color="{var.color-white}" font="control" font-size="{var.text-body}" padding="0 8px"
+					       halign="start" valign="center" stroke="{var.stroke-border}" stroke-width="1px"/>
+				</container>
+			</template>
+
+			<template id="settings-number">
+				<props>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="min" type="number" required="true"/>
+					<prop name="max" type="number" required="true"/>
+					<prop name="step" type="number" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+				</props>
+				<input type="number" width="242px" height="36px"
+				       bind="{template.bind}" min="{template.min}" max="{template.max}" step="{template.step}"
+				       commit="{template.commit}" value-type="{template.value-type}" fill="{var.fill-control}"
+				       color="{var.color-white}" font="control" font-size="{var.text-body}" padding="0 8px"
+				       halign="start" valign="center" stroke="{var.stroke-border}" stroke-width="1px"/>
+			</template>
+
+			<template id="settings-number-row">
+				<props>
+					<prop name="label" type="string" required="true"/>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="min" type="number" required="true"/>
+					<prop name="max" type="number" required="true"/>
+					<prop name="step" type="number" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+				</props>
+				<container type="vertical" width="100%" height="auto" gap="8px" padding="8px 12px" valign="start"
+				           visible="{(cvar.ui_om_settings_search == '' or icontains('{template.label}', cvar.ui_om_settings_search))}">
+					<label width="fill" height="auto" font="body" font-size="{var.text-body}" valign="start" color="{var.color-primary}">{template.label}</label>
+					<use template="settings-number" bind="{template.bind}" min="{template.min}" max="{template.max}"
+					     step="{template.step}" commit="{template.commit}" value-type="{template.value-type}"/>
+					<container width="fill" height="1px" fill="{var.fill-divider}"/>
+				</container>
+			</template>
+
+			<template id="settings-on-off">
+				<props>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="off-label" type="string" required="false" default="Off"/>
+					<prop name="on-label" type="string" required="false" default="On"/>
+					<prop name="off-value" type="string" required="false" default="0"/>
+					<prop name="on-value" type="string" required="false" default="1"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+				</props>
+				<container type="horizontal" width="auto" height="36px" gap="8px">
+					<button width="auto" height="100%" padding="0 8px"
+					        bind="{template.bind}" commit="{template.commit}" value-type="{template.value-type}"
+					        set-value="{template.off-value}"
+					        fill="{bind.selected ? var.color-accent : var.fill-control}" hoverfill="{var.fill-chip}" pressed-fill="{var.color-accent-pressed}"
+					        color="{var.color-muted}" font="control" font-size="{var.text-body}" letter-spacing="1px"
+					        shape="rectangle" stroke="{var.stroke-border}" stroke-width="1px">{template.off-label}</button>
+					<button width="auto" height="100%" padding="0 8px"
+					        bind="{template.bind}" commit="{template.commit}" value-type="{template.value-type}"
+					        set-value="{template.on-value}"
+					        fill="{bind.selected ? var.color-accent : var.fill-control}" hoverfill="{var.fill-chip}" pressed-fill="{var.color-accent-pressed}"
+					        color="{var.color-muted}" font="control" font-size="{var.text-body}" letter-spacing="1px"
+					        shape="rectangle" stroke="{var.stroke-border}" stroke-width="1px">{template.on-label}</button>
+				</container>
+			</template>
+
+			<template id="settings-on-off-row">
+				<props>
+					<prop name="label" type="string" required="true"/>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="off-label" type="string" required="false" default="Off"/>
+					<prop name="on-label" type="string" required="false" default="On"/>
+					<prop name="off-value" type="string" required="false" default="0"/>
+					<prop name="on-value" type="string" required="false" default="1"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+				</props>
+				<container type="vertical" width="100%" height="auto" gap="8px" padding="8px 12px" valign="start"
+				           visible="{(cvar.ui_om_settings_search == '' or icontains('{template.label}', cvar.ui_om_settings_search))}">
+					<label width="fill" height="auto" font="body" font-size="{var.text-body}" valign="start" color="{var.color-primary}">{template.label}</label>
+					<use template="settings-on-off" bind="{template.bind}" commit="{template.commit}"
+					     off-label="{template.off-label}" on-label="{template.on-label}"
+					     off-value="{template.off-value}" on-value="{template.on-value}"
+					     value-type="{template.value-type}"/>
+					<container width="fill" height="1px" fill="{var.fill-divider}"/>
+				</container>
+			</template>
+
+			<!-- Added in Omaha: composable cyclic row (foreach + step-index). -->
+			<template id="settings-cyclic">
+				<props>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="source" type="string" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+					<prop name="display" type="string" required="false" default="label"/>
+				</props>
+				<container type="horizontal" width="242px" height="36px" gap="0"
+				           source="{template.source}" bind="{template.bind}" wrap="true"
+				           collection-display="{template.display}"
+				           commit="{template.commit}" value-type="{template.value-type}"
+						   fill="{var.fill-control}" stroke="{var.stroke-border}" stroke-width="1px">
+					<button valign="center" halign="center" width="32px" height="100%" step-index="-1" fill="{var.fill-control}" hoverfill="{var.fill-chip}"
+					        pressed-fill="{var.color-accent}" color="{var.color-muted}" font="control" font-size="{var.text-body}"
+					        shape="rectangle">
+						<shape shape="arrow-left" width="8px" height="10px" thickness="3px" fill="{var.color-muted}"/>
+					</button>
+					<container width="1px" height="100%" fill="{var.fill-divider}"/>
+					<container type="vertical" width="fill" height="100%" gap="2px" valign="start" padding="4px 8px 2px 8px">
+						<foreach mode="selected" width="fill" height="fill">
+							<label width="fill" height="fill" halign="center" valign="center"
+							       font="control" font-size="{var.text-body}" letter-spacing="1px" color="{var.color-primary}">{item.display}</label>
+						</foreach>
+						<foreach mode="all" type="horizontal" width="fill" height="4px" gap="2px" valign="center">
+							<container width="fill"
+							           height="{item.selected ? 4px : 2px}"
+							           fill="{item.selected ? var.color-accent : var.fill-chip}"/>
+						</foreach>
+					</container>
+					<container width="1px" height="100%" fill="{var.fill-divider}"/>
+					<button valign="center" halign="center" width="32px" height="100%" step-index="1" fill="{var.fill-control}" hoverfill="{var.fill-chip}"
+					        pressed-fill="{var.color-accent}" color="{var.color-muted}" font="control" font-size="{var.text-body}"
+					        shape="rectangle">
+						<shape shape="arrow-left" width="8px" height="10px" thickness="3px" fill="{var.color-muted}" shape-rotation="180"/>
+					</button>
+				</container>
+			</template>
+			
+			<template id="settings-cyclic-row">
+				<props>
+					<prop name="label" type="string" required="true"/>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="source" type="string" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+				</props>
+				<container type="vertical" width="100%" height="auto" gap="8px" padding="8px 12px" valign="start"
+				           visible="{(cvar.ui_om_settings_search == '' or icontains('{template.label}', cvar.ui_om_settings_search))}">
+					<label width="fill" height="auto" font="body" font-size="{var.text-body}" valign="start" color="{var.color-primary}">{template.label}</label>
+					<use template="settings-cyclic" bind="{template.bind}" source="{template.source}"
+					     commit="{template.commit}" value-type="{template.value-type}"/>
+					<container width="fill" height="1px" fill="{var.fill-divider}"/>
+				</container>
+			</template>
+
+			<template id="settings-slider-row">
+				<props>
+					<prop name="label" type="string" required="true"/>
+					<prop name="bind" type="binding" required="true"/>
+					<prop name="min" type="number" required="true"/>
+					<prop name="max" type="number" required="true"/>
+					<prop name="step" type="number" required="true"/>
+					<prop name="commit" type="string" required="false" default="change"/>
+					<prop name="value-type" type="string" required="false" default="none"/>
+				</props>
+				<container type="vertical" width="100%" height="auto" gap="8px" padding="8px 12px" valign="start"
+				           visible="{(cvar.ui_om_settings_search == '' or icontains('{template.label}', cvar.ui_om_settings_search))}">
+					<label width="fill" height="auto" font="body" font-size="{var.text-body}" valign="start" color="{var.color-primary}">{template.label}</label>
+					<use template="settings-slider" bind="{template.bind}" min="{template.min}" max="{template.max}"
+					     step="{template.step}" commit="{template.commit}" value-type="{template.value-type}"/>
+					<container width="fill" height="1px" fill="{var.fill-divider}"/>
+				</container>
+			</template>
+			
+			<template id="settings-header-row">
+				<container type="vertical" width="100%" height="41px" margin="0 0 8px 0" fill="{var.fill-transparent}">
+					<container type="horizontal" width="100%" height="fill" padding="8px 12px" gap="8px" valign="center">
+						<label width="40%" height="auto" font="body" font-size="{var.text-control}" color="{var.color-primary}">ACTION</label>
+						<container width="fill" height="1px"/>
+						<label width="120px" height="auto" color="{var.color-muted}" font="control" font-size="{var.text-control}" halign="center" valign="center">PRIMARY</label>
+						<label width="120px" height="auto" color="{var.color-muted}" font="control" font-size="{var.text-control}" halign="center" valign="center">SECONDARY</label>
+					</container>
+					<container width="100%" height="1px" fill="{var.color-accent}"/>
+				</container>
+			</template>
+
+			<!-- Added in Omaha: single-title header matching settings-header-row chrome. -->
+			<template id="settings-section-header">
+				<props>
+					<prop name="label" type="string" required="true"/>
+				</props>
+				<container type="vertical" width="100%" height="41px" margin="0 0 8px 0" fill="{var.fill-transparent}">
+					<container type="horizontal" width="100%" height="fill" padding="8px 12px" gap="8px" valign="center">
+						<label width="100%" height="auto" font="body" font-size="{var.text-control}" color="{var.color-primary}">{template.label}</label>
+					</container>
+					<container width="100%" height="1px" fill="{var.color-accent}"/>
+				</container>
+			</template>
+
+			<template id="settings-category-row">
+				<props>
+					<prop name="label" type="string" required="true"/>
+				</props>
+				<container type="vertical" width="100%" height="38px" fill="{var.fill-control}"
+				           visible="{(cvar.ui_om_settings_search == '' or icontains('{template.label}', cvar.ui_om_settings_search))}">
+					<label width="40%" height="fill" padding="8px 12px" font="control" font-size="{var.text-body}"
+					       color="{var.color-white}" valign="center">{template.label}</label>
+					<container width="100%" height="1px" fill="{var.color-accent}"/>
+				</container>
+			</template>
+
+			<template id="settings-keybind-row">
+				<props>
+					<prop name="label" type="string" required="true"/>
+					<prop name="binding" type="string" required="true"/>
+				</props>
+				<container type="vertical" width="100%" height="59px" fill="{var.fill-transparent}"
+				           visible="{(cvar.ui_om_settings_search == '' or icontains('{template.label}', cvar.ui_om_settings_search))}">
+					<container type="horizontal" width="100%" height="fill" padding="4px 12px 8px 12px" gap="8px" valign="center">
+						<label width="40%" height="auto" font="body" font-size="{var.text-body}" color="{var.color-primary}">{template.label}</label>
+						<container width="fill" height="1px"/>
+						<keybind width="120px" height="100%" binding="{template.binding}" slot="primary"
+								confirm-modal="bind_overwrite" empty-label="NONE"
+								capture-label="PRESS KEY"
+								fill="{var.fill-control}" color="{var.color-white}" font="control" font-size="{var.text-body}"
+								stroke="{var.fill-divider}" stroke-width="1px"/>
+						<keybind width="120px" height="100%" binding="{template.binding}" slot="secondary"
+								confirm-modal="bind_overwrite" empty-label="NONE"
+								capture-label="PRESS KEY"
+								fill="{var.fill-control}" color="{var.color-disabled}" font="control" font-size="{var.text-body}"
+								stroke="{var.fill-divider}" stroke-width="1px"/>
+					</container>
+					<container width="100%" height="1px" fill="{var.fill-divider}"/>
+				</container>
+			</template>
+
+			<template id="browser-filter-tab">
+				<props>
+					<prop name="label" type="string" required="true"/>
+					<prop name="filter" type="string" required="true"/>
+				</props>
+				<button width="auto" height="100%" padding="0 20px" shape="skew-rect"
+				        fill="{var.fill-transparent}" hoverfill="{var.fill-hover-ghost}" color="{var.color-muted}"
+				        font="control" font-size="{var.text-control}" letter-spacing="2px" skewl="12px" skewr="12px">
+					{template.label}
+					<on event="click">
+						<set-cvar name="ui_om_server_gametype" value="{template.filter}"/>
+					</on>
+				</button>
+			</template>
+		</templates>
+</ui-library>

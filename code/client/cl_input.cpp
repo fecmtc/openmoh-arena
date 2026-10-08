@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "cl_ui.h"
 #include "cl_moharena.h" // Added in MoH Arena
+#include "cl_uirender.h"
 
 unsigned	frame_msec;
 int			old_com_frameTime;
@@ -86,6 +87,28 @@ void IN_MouseOn( void ) {
 				CL_KeyEvent( k, qfalse, 0 );
 			}
 		}
+		// Changed in MoH Arena: only with the modern UI
+		if( MoHArena_ModernUI() )
+		{
+			IN_GetMousePosition(&cl.mousex, &cl.mousey);
+		}
+	}
+
+	in_guimouse = qtrue;
+}
+
+/*
+=================
+IN_MouseOnKeepKeys
+
+Added in Omaha: enable GUI mouse without synthesizing key-ups. Hold-TAB overlays
+(scoreboard) must keep the binding key down or -scores closes immediately.
+=================
+*/
+void IN_MouseOnKeepKeys( void ) {
+	if( !in_guimouse )
+	{
+		IN_GetMousePosition(&cl.mousex, &cl.mousey);
 	}
 
 	in_guimouse = qtrue;
@@ -442,20 +465,45 @@ void CL_MouseEvent( int dx, int dy, int time ) {
 
 	if( in_guimouse )
 	{
+		int clampW = 0;
+		int clampH = 0;
+
 		cl.mousex += dx;
 		cl.mousey += dy;
+
+		/*
+		 * Changed in Omaha: modern clamps to UiVid S (surface/layout); legacy to
+		 * glconfig. Absolute path keeps cl.mouse in window space — clamp to
+		 * window when S matches window, else still clamp to window so MapMouse
+		 * can scale into S.
+		 */
+		if( CL_UIR_UseLegacyMain() ) {
+			clampW = cls.glconfig.vidWidth;
+			clampH = cls.glconfig.vidHeight;
+		} else {
+			IN_GetWindowLogicalSize( &clampW, &clampH );
+			if( clampW <= 0 || clampH <= 0 ) {
+				CL_UIR_GetUiVidSize( &clampW, &clampH );
+			}
+			if( clampW <= 0 ) {
+				clampW = cls.glconfig.vidWidth;
+			}
+			if( clampH <= 0 ) {
+				clampH = cls.glconfig.vidHeight;
+			}
+		}
 
 		if( cl.mousex < 0 )
 			cl.mousex = 0;
 
-		if( cl.mousex > cls.glconfig.vidWidth )
-			cl.mousex = cls.glconfig.vidWidth;
+		if( cl.mousex > clampW )
+			cl.mousex = clampW;
 
 		if( cl.mousey < 0 )
 			cl.mousey = 0;
 
-		if( cl.mousey > cls.glconfig.vidHeight )
-			cl.mousey = cls.glconfig.vidHeight;
+		if( cl.mousey > clampH )
+			cl.mousey = clampH;
 	}
 	else if ( !paused->integer )
 	{
@@ -488,7 +536,8 @@ when the UI catcher is active.
 =================
 */
 void CL_UpdateMouse() {
-    if (!(Key_GetCatcher() & KEYCATCH_UI)) {
+    // Changed in MoH Arena: the second test is for the modern UI only
+    if (!(Key_GetCatcher() & KEYCATCH_UI) && !(MoHArena_ModernUI() && in_guimouse && clc.state == CA_ACTIVE)) {
         return;
     }
 

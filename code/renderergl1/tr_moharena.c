@@ -224,6 +224,13 @@ static void MoHArena_Begin2D(void)
         return;
     }
 
+    // With the modern UI a repeated 2D window is skipped, and the queue would
+    // then be drawn too late: draw what is queued and forget the last window.
+    // With the original UI Set2DWindow never skips and draws the queue itself.
+    if (R_ModernUI()) {
+        R_IssuePendingRenderCommands();
+        RE_InvalidateSet2DWindow();
+    }
     Set2DWindow(
         0, 0, glConfig.vidWidth, glConfig.vidHeight, 0, glConfig.vidWidth, glConfig.vidHeight, 0, -1, 1
     );
@@ -285,7 +292,8 @@ static int MoHArena_DrawTriangles(
         return 0;
     }
 
-    qglScissor(left, glConfig.vidHeight - bottom, right - left, bottom - top);
+    // GL_Scissor, not qglScissor: the modern UI keeps track of the rectangle.
+    GL_Scissor(left, glConfig.vidHeight - bottom, right - left, bottom - top);
 
     if (entry) {
         MoHArena_BindTexture(entry->texnum);

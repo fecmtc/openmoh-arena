@@ -24,6 +24,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "cl_ui.h"
 #include "cl_moharena.h" // Added in MoH Arena
+#include "cl_uirender.h"
+#include "../uidesign/uid_profile.h"
+#include "cl_uiperf.h"
 
 qboolean	scr_initialized;		// ready to draw
 stereoFrame_t	s_scr_stereoFrame;
@@ -486,7 +489,16 @@ void UpdateStereoSide( stereoFrame_t s ) {
 	if( clc.state == CA_CINEMATIC ) {
 		SCR_DrawCinematic();
 	}
+	// Changed in MoH Arena: only with the modern UI
+	if (MoHArena_ModernUI()) {
+		/* Added in Omaha: whole-frame UI sample (HUD sync lives inside View3D / overlay). */
+		CL_UIR_ProfileBeginSample("ui_total");
+	}
 	UI_Update();
+	// Changed in MoH Arena: only with the modern UI
+	if (MoHArena_ModernUI()) {
+		CL_UIR_ProfileEndSample("ui_total");
+	}
 }
 
 /*
@@ -538,6 +550,12 @@ void SCR_UpdateScreen( void ) {
 
 	screen_recursive = qtrue;
 	
+	// Changed in MoH Arena: only with the modern UI
+	if (MoHArena_ModernUI()) {
+		/* Added in Omaha: ui_perf_hud frame/render wall timing. */
+		CL_UIPerf_FrameBegin();
+	}
+
 	CL_StartHunkUsers(qfalse);
 	SCR_SimpleUpdateScreen();
 
@@ -560,6 +578,10 @@ void SCR_UpdateScreen( void ) {
 		}
 	}
 
+	// Changed in MoH Arena: only with the modern UI
+	if (MoHArena_ModernUI()) {
+		CL_UIPerf_FrameEnd();
+	}
 	screen_recursive = qfalse;
 }
 

@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // text commands typed in at the local console, or executed by a key binding
 
 #include "cg_local.h"
+
+static qboolean cg_scoresKeyHeld = qfalse;
 #include "../fgame/bg_voteoptions.h"
 
 void CG_TargetCommand_f(void);
@@ -89,11 +91,25 @@ void CG_ScoresDown_f(void)
         return;
     }
 
+    if (CG_UseModernHudPack() && cgi.CL_UIMenu_OpenHold && cgi.CL_UIR_ScoreboardMenuId) {
+        if (!cg_scoresKeyHeld) {
+            cg_scoresKeyHeld = qtrue;
+            cgi.CL_UIMenu_OpenHold(cgi.CL_UIR_ScoreboardMenuId());
+        }
+    } else {
+        // Added in MoH Arena: with the stock HUD the modern scoreboard is not
+        //  held, so it opens again when the player changes back to a HUD pack
+        //  while the scores are still shown
+        cg_scoresKeyHeld = qfalse;
+    }
+
     if (cg.scoresRequestTime + 2000 >= cg.time) {
         // send another request
         cg.showScores = qtrue;
         CG_PrepScoreBoardInfo();
-        cgi.UI_ShowScoreBoard(cg.scoresMenuName);
+        if (!CG_UseModernHudPack()) {
+            cgi.UI_ShowScoreBoard(cg.scoresMenuName);
+        }
         return;
     }
 
@@ -104,7 +120,9 @@ void CG_ScoresDown_f(void)
         // don't display anything until first score returns
         cg.showScores = qtrue;
         CG_PrepScoreBoardInfo();
-        cgi.UI_ShowScoreBoard(cg.scoresMenuName);
+        if (!CG_UseModernHudPack()) {
+            cgi.UI_ShowScoreBoard(cg.scoresMenuName);
+        }
     }
 }
 
@@ -117,6 +135,18 @@ void CG_ScoresUp_f(void)
         }
 
         return;
+    }
+
+    // Changed in MoH Arena: both scoreboards are closed here, whatever the HUD
+    //  style is now. Each was closed only under its own style, so a scoreboard
+    //  that was up when the player changed the style in the settings stayed
+    //  open: the modern one unseen under the stock HUD, where it took the
+    //  Escape key, and the stock one on screen under a HUD pack.
+    //  With the original UI this is the stock code: no modern scoreboard, and
+    //  the stock one is hidden as before.
+    if (CG_ModernUI() && cgi.CL_UIMenu_CloseHold && cgi.CL_UIR_ScoreboardMenuId) {
+        cg_scoresKeyHeld = qfalse;
+        cgi.CL_UIMenu_CloseHold(cgi.CL_UIR_ScoreboardMenuId());
     }
 
     if (!cg.showScores) {
@@ -556,6 +586,18 @@ qboolean CG_ConsoleCommand(void)
 
     cmd = cgi.Argv(0);
 
+    // Added in MoH Arena: "useprimary" is a command of the modern UI only
+    if (CG_ModernUI() && !Q_stricmp(cmd, "useprimary")) {
+        CG_UsePrimaryWeapon_f(); /* Added in Omaha */
+        return qtrue;
+    }
+
+    // Added in MoH Arena: the key for the first-person view while spectating, modern UI only
+    if (CG_ModernUI() && !Q_stricmp(cmd, "toggle_spectate_firstperson")) {
+        CG_SpectateFP_Toggle_f();
+        return qtrue;
+    }
+
     for (i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         if (!Q_stricmp(cmd, commands[i].cmd)) {
             commands[i].function();
@@ -584,6 +626,12 @@ void CG_InitConsoleCommands(void)
 
     cgi.AddCommand("callvote");
     cgi.AddCommand("vote");
+
+    // Added in MoH Arena: these two are commands of the modern UI only
+    if (CG_ModernUI()) {
+        cgi.AddCommand("useprimary"); /* Added in Omaha */
+        cgi.AddCommand("toggle_spectate_firstperson");
+    }
 }
 
 void CG_Mapinfo_f(void)
@@ -623,11 +671,95 @@ void CG_PushMenuWeaponSelect_f(void)
     cgi.Cmd_Execute(EXEC_NOW, "pushmenu SelectPrimaryWeapon\n");
 }
 
+/* Added in Omaha: rifle/smg/mg/heavy — matches modern HUD primary slot. */
+static const int cg_primaryWeaponClassMask =
+    WEAPON_CLASS_RIFLE | WEAPON_CLASS_SMG | WEAPON_CLASS_MG | WEAPON_CLASS_HEAVY;
+
+/* Sticky last primary class so useprimary restores the gun you were on (SP multi-primary). */
+static int cg_lastPrimaryWeaponCommand = WEAPON_COMMAND_USE_RIFLE;
+
+static int CG_WeaponCommandForPrimaryClass(int weaponClass)
+{
+    if (weaponClass & WEAPON_CLASS_RIFLE) {
+        return WEAPON_COMMAND_USE_RIFLE;
+    }
+    if (weaponClass & WEAPON_CLASS_SMG) {
+        return WEAPON_COMMAND_USE_SMG;
+    }
+    if (weaponClass & WEAPON_CLASS_MG) {
+        return WEAPON_COMMAND_USE_MG;
+    }
+    if (weaponClass & WEAPON_CLASS_HEAVY) {
+        return WEAPON_COMMAND_USE_HEAVY;
+    }
+    return WEAPON_COMMAND_NONE;
+}
+
+static qboolean CG_OwnsWeaponCommandClass(int owned, int weaponCommand)
+{
+    switch (weaponCommand) {
+    case WEAPON_COMMAND_USE_RIFLE:
+        return (owned & WEAPON_CLASS_RIFLE) != 0;
+    case WEAPON_COMMAND_USE_SMG:
+        return (owned & WEAPON_CLASS_SMG) != 0;
+    case WEAPON_COMMAND_USE_MG:
+        return (owned & WEAPON_CLASS_MG) != 0;
+    case WEAPON_COMMAND_USE_HEAVY:
+        return (owned & WEAPON_CLASS_HEAVY) != 0;
+    default:
+        return qfalse;
+    }
+}
+
+/*
+ * Added in Omaha: switch to primary (rifle/smg/mg/heavy) using stock USE_* bits.
+ * Prefer currently equipped primary, else last primary still owned, else first owned.
+ */
+void CG_UsePrimaryWeapon_f(void)
+{
+    int owned;
+    int equipped;
+    int cmd;
+
+    if (!cg.snap) {
+        return;
+    }
+
+    owned    = cg.snap->ps.stats[STAT_WEAPONS] & 0x3F;
+    equipped = cg.snap->ps.stats[STAT_EQUIPPED_WEAPON] & 0x3F;
+
+    cmd = CG_WeaponCommandForPrimaryClass(equipped);
+    if (cmd != WEAPON_COMMAND_NONE) {
+        cg_lastPrimaryWeaponCommand = cmd;
+    } else if (CG_OwnsWeaponCommandClass(owned, cg_lastPrimaryWeaponCommand)) {
+        cmd = cg_lastPrimaryWeaponCommand;
+    } else {
+        cmd = CG_WeaponCommandForPrimaryClass(owned & cg_primaryWeaponClassMask);
+        if (cmd != WEAPON_COMMAND_NONE) {
+            cg_lastPrimaryWeaponCommand = cmd;
+        }
+    }
+
+    if (cmd == WEAPON_COMMAND_NONE) {
+        return;
+    }
+
+    cg.iWeaponCommand     = cmd;
+    cg.iWeaponCommandSend = 0;
+}
+
 void CG_UseWeaponClass_f(void)
 {
     const char *cmd;
 
     cmd = cgi.Argv(1);
+
+    // Changed in MoH Arena: "primary" is known to the modern UI only
+    /* Added in Omaha: primary alias shares the dedicated helper. */
+    if (CG_ModernUI() && !Q_stricmp(cmd, "primary")) {
+        CG_UsePrimaryWeapon_f();
+        return;
+    }
 
     if (!Q_stricmp(cmd, "pistol")) {
         cg.iWeaponCommand = WEAPON_COMMAND_USE_PISTOL;

@@ -425,6 +425,12 @@ own differences.
   menu and the other MoH Arena features. The module loads only when MoH Arena
   Guard starts the game and the module file next to the exe has the SHA-256
   that Guard gives. In any other case the game runs like OpenMoHAA.
+- An optional modern UI: the menus and HUD of
+  [Project: Omaha](https://github.com/JayRewd/omaha) by JayRewd. It is off by
+  default. MoH Arena Guard turns it on with its "Use the modern UI" box, which
+  starts the game with `+set ui_legacy 0`. Its files are the pack
+  `main/zz_moharena_ui.pk3`. Without the pack the game starts with the
+  original UI. See [the modern UI's notes](../../modern-ui/README.md).
 
 ## Planned features
 

@@ -130,6 +130,11 @@ void R_IssuePendingRenderCommands( void ) {
 	if ( !tr.registered ) {
 		return;
 	}
+	// Added in MoH Arena: the counter is only kept with the modern UI.
+	if ( R_ModernUI() ) {
+		/* Added in Omaha: ui_perf_hud counter. */
+		tr_uiStats.issuePending++;
+	}
 	R_IssueRenderCommands( qfalse );
 }
 
@@ -338,6 +343,12 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 		return;
 	}
 	glState.finishCalled = qfalse;
+
+	// Added in MoH Arena: the counters are only kept with the modern UI.
+	if ( R_ModernUI() ) {
+		/* Added in Omaha: roll UI GL event counters for ui_perf_hud. */
+		RE_UiStatsFrameBegin();
+	}
 
 	tr.frameCount++;
 	tr.frameSceneNum = 0;

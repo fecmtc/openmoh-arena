@@ -350,6 +350,15 @@ extern "C" {
 		clientInfo_t clientinfo[MAX_CLIENTS];
 		radarClient_t radars[MAX_CLIENTS];
 		qhandle_t radarShaders[2];
+
+		/* Added in Omaha: client-side first-person chase spectate state. */
+		struct {
+			qboolean active;
+			int      clientNum;
+			float    leanAngle;
+			qboolean inZoom;
+			int      zoomFov;
+		} spectateFp;
     } cg_t;
 
     typedef struct {
@@ -475,11 +484,14 @@ extern "C" {
     extern cvar_t *cg_hitmessages;
     extern cvar_t *cg_acidtrip;
     extern cvar_t *cg_hud;
+    extern cvar_t *cg_hud_push_cache; /* Added in Omaha: Phase 4.5 */
     extern cvar_t *cg_huddraw_force;
     extern cvar_t *cg_drawsvlag;
     extern cvar_t *cg_crosshair;
     extern cvar_t *cg_crosshair_friend;
     extern cvar_t *ui_crosshair;
+    extern cvar_t *ui_legacy;
+    extern cvar_t *ui_om_hud;
     extern cvar_t *vm_offset_max;
     extern cvar_t *vm_offset_speed;
     extern cvar_t *vm_sway_front;
@@ -512,7 +524,9 @@ extern "C" {
     // Added in OPM
     //
     extern cvar_t *cg_fov;
+    extern cvar_t *cg_zoomSensitivity;
     extern cvar_t *cg_cheats;
+    extern cvar_t *cg_spectate_firstperson;
 
     //
     // cg_main.c
@@ -618,6 +632,20 @@ extern "C" {
     void CG_CalcViewModelMovement(float fViewBobPhase, float fViewBobAmp, vec_t *vVelocity, vec_t *vMovement);
 
     //
+    // cg_spectate_fp.c
+    //
+    void        CG_SpectateFP_RegisterCvars(void);
+    void        CG_SpectateFP_Toggle_f(void); // Added in MoH Arena
+    void        CG_SpectateFP_Update(void);
+    qboolean    CG_SpectateFP_Wanted(void);
+    qboolean    CG_SpectateFP_Active(void);
+    int         CG_SpectateFP_FollowClient(void);
+    qboolean    CG_SpectateFP_InZoom(void);
+    int         CG_SpectateFP_ZoomFov(void);
+    float       CG_SpectateFP_LeanAngle(void);
+    qboolean    CG_SpectateFP_CalcEye(vec3_t outOrigin, vec3_t outAngles);
+
+    //
     // cg_drawtools.c
     //
     void CG_AdjustFrom640(float *x, float *y, float *w, float *h);
@@ -633,6 +661,12 @@ extern "C" {
     void CG_InitializeObjectives();
     void CG_DrawObjectives();
     void CG_Draw2D(void);
+    void CG_SyncModernHudCvars(void);
+    void CG_HudSetCached(const char *name, const char *value);
+    void CG_HudPushCacheReset(void);
+    // Added in MoH Arena: qtrue when the game was started with the modern UI (ui_legacy 0)
+    qboolean CG_ModernUI(void);
+    qboolean CG_UseModernHudPack(void);
 
     //
     // cg_draw.c
@@ -787,6 +821,7 @@ extern "C" {
     void     CG_PushMenuTeamSelect_f(void);
     void     CG_PushMenuWeaponSelect_f(void);
     void     CG_UseWeaponClass_f(void);
+    void     CG_UsePrimaryWeapon_f(void); /* Added in Omaha */
     void     CG_NextWeapon_f(void);
     void     CG_PrevWeapon_f(void);
     void     CG_UseLastWeapon_f(void);
@@ -908,6 +943,8 @@ qboolean CG_LightStyleColor(int style, int realtime, vec4_t color, qboolean clam
     void CG_PrepScoreBoardInfo();
     void CG_ParseScores();
     void CG_InitScoresAPI(clientGameExport_t *cge);
+    /* Added in Omaha: silent team-score refresh for modern HUD Allied/Axis strip. */
+    void CG_RequestHudTeamScoresSilent(void);
 
     //
     // cg_specialfx.cpp
