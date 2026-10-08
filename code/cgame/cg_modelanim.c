@@ -1012,8 +1012,8 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
      * ghost, but still run anims + ClientCommands so gunshot frame sounds fire.
      * Early return previously muted weapon sounds and broke attach parents.
      */
-    // Changed in MoH Arena: first-person spectate belongs to the modern UI
-    if (CG_ModernUI() && CG_SpectateFP_Active()) {
+    // Added in MoH Arena: in both UIs, for the server's first-person switch (CG_SpectateFP_Wanted)
+    if (CG_SpectateFP_Active()) {
         const int followClient = CG_SpectateFP_FollowClient();
         if (s1->number == followClient || s1->parent == followClient
             || s1->number == cg.snap->ps.clientNum || s1->parent == cg.snap->ps.clientNum) {

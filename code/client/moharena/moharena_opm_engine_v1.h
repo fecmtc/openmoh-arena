@@ -61,7 +61,11 @@ enum {
     MOHARENA_OPM_FEATURE_PRINT_FILTER = 0x1,
     /* In AA the bridge asks the module's kill_line_color about every death
      * message, and shows the ones it names in green. */
-    MOHARENA_OPM_FEATURE_KILL_COLORS = 0x2
+    MOHARENA_OPM_FEATURE_KILL_COLORS = 0x2,
+    /* The bridge's cgame reads the serverinfo key "moharena_firstperson":
+     * while it is "1", a spectator sees through the eyes of the player they
+     * follow. */
+    MOHARENA_OPM_FEATURE_SPECTATOR_FIRST_PERSON = 0x4
 };
 
 typedef struct MohArenaOpmClientStateV1 {

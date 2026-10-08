@@ -617,10 +617,9 @@ void CG_DrawZoomOverlay()
             } else {
                 zoomType = 0;
             }
-        } else if (CG_ModernUI() && !cg.snap->ps.stats[STAT_INZOOM] && CG_SpectateFP_InZoom()
-                   && CG_SpectateFP_ZoomFov() <= 30) {
-            // Added in MoH Arena: the zoom of the player followed in first-person spectate,
-            //  which belongs to the modern UI
+        } else if (!cg.snap->ps.stats[STAT_INZOOM] && CG_SpectateFP_InZoom() && CG_SpectateFP_ZoomFov() <= 30) {
+            // Added in MoH Arena: the zoom of the player followed in first-person spectate, in both UIs
+            //  for the server's first-person switch (CG_SpectateFP_Wanted)
             if (!Q_stricmp(weaponstring, "KAR98 - Sniper")) {
                 zoomType = 1;
             } else {

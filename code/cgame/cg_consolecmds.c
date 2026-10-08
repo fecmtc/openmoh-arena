@@ -822,20 +822,67 @@ void CG_ToggleItem_f(void)
     cg.iWeaponCommandSend = 0;
 }
 
+// Added in MoH Arena: two different weapon commands never reach the server
+// within one of its frames. The original server collects the newly set command
+// bits of all usercmds of a frame with OR, so "previous" (11) and "next" (12)
+// from a fast turn of the wheel became "drop" (15), and a command that follows
+// another one without a free usercmd in between is read as the bits the two
+// differ in. A command that differs from the last one sent therefore waits
+// until that one's usercmds are out, WEAPON_COMMAND_GAP_CMDS usercmds without
+// a command have followed and WEAPON_COMMAND_GAP_MSEC have gone by: more than
+// a server frame and the time a usercmd waits for its packet. The newest
+// command asked for wins. The same command asked for again goes out at once,
+// as before.
+#define WEAPON_COMMAND_SENDS    3
+#define WEAPON_COMMAND_GAP_CMDS 2
+#define WEAPON_COMMAND_GAP_MSEC 150
+
+static qboolean CG_WeaponCommandHeld(int iNow)
+{
+    if (!cg.iWeaponCommandSent || cg.iWeaponCommand == cg.iWeaponCommandSent) {
+        return qfalse;
+    }
+
+    if (cg.iWeaponCommandGap < WEAPON_COMMAND_GAP_CMDS) {
+        return qtrue;
+    }
+
+    return ((unsigned int)iNow - (unsigned int)cg.iWeaponCommandSentTime) < WEAPON_COMMAND_GAP_MSEC ? qtrue : qfalse;
+}
+
 int CG_WeaponCommandButtonBits(void)
 {
     int iShiftedWeaponCommand;
+    int iCommand;
+    int iNow;
 
-    if (!cg.iWeaponCommand) {
+    iNow     = cgi.Milliseconds();
+    iCommand = cg.iWeaponCommand;
+
+    // Changed in MoH Arena: see above
+    if (iCommand && iCommand != cg.iWeaponCommandSent && cg.iWeaponCommandSentLeft > 0) {
+        // the command that is on its way goes out in full first
+        iCommand = cg.iWeaponCommandSent;
+        cg.iWeaponCommandSentLeft--;
+    } else if (!iCommand || CG_WeaponCommandHeld(iNow)) {
+        if (cg.iWeaponCommandGap < WEAPON_COMMAND_GAP_CMDS) {
+            cg.iWeaponCommandGap++;
+        }
         return 0;
+    } else {
+        cg.iWeaponCommandSend++;
+        cg.iWeaponCommandSent     = iCommand;
+        cg.iWeaponCommandSentLeft = WEAPON_COMMAND_SENDS - cg.iWeaponCommandSend;
+        if (cg.iWeaponCommandSend >= WEAPON_COMMAND_SENDS) {
+            cg.iWeaponCommand         = 0;
+            cg.iWeaponCommandSentLeft = 0;
+        }
     }
 
-    iShiftedWeaponCommand = cg.iWeaponCommand << 7;
+    cg.iWeaponCommandSentTime = iNow;
+    cg.iWeaponCommandGap      = 0;
 
-    cg.iWeaponCommandSend++;
-    if (cg.iWeaponCommandSend > 2) {
-        cg.iWeaponCommand = 0;
-    }
+    iShiftedWeaponCommand = iCommand << 7;
 
     return iShiftedWeaponCommand & GetWeaponCommandMask(cg_protocol >= PROTOCOL_MOHTA_MIN ? WEAPON_COMMAND_MAX_VER17 : WEAPON_COMMAND_MAX_VER6);
 }

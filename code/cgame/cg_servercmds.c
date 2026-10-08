@@ -139,6 +139,9 @@ void CG_ParseServerinfo(void)
     cgs.timelimit  = atoi(Info_ValueForKey(info, "timelimit"));
     cgs.maxclients = atoi(Info_ValueForKey(info, "sv_maxclients"));
 
+    // Added in MoH Arena: the server's first-person spectator switch
+    CG_SpectateFP_ParseServerinfo(info);
+
     version = Info_ValueForKey(info, "version");
     if (strstr(version, "Spearhead")) {
         cgi.Cvar_Set("g_servertype", "1");

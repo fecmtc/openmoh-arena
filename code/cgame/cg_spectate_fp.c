@@ -39,6 +39,9 @@ cvar_t *cg_spectate_firstperson;
 static int   s_fpLastClient   = -1;
 static float s_fpLeanSmoothed = 0.0f;
 
+// Added in MoH Arena: the server's switch, its serverinfo key "moharena_firstperson"
+static qboolean s_fpServerWanted = qfalse;
+
 void CG_SpectateFP_RegisterCvars(void)
 {
 	/* Added in Omaha */
@@ -55,9 +58,24 @@ void CG_SpectateFP_Toggle_f(void)
 	cgi.Cvar_Set("cg_spectate_firstperson", cg_spectate_firstperson->integer ? "0" : "1");
 }
 
+// Added in MoH Arena: the server's switch. While its serverinfo key "moharena_firstperson" is exactly "1",
+//  everyone who follows a player as a spectator sees through that player's eyes, in both UIs. Any other
+//  value, and a serverinfo without the key, leave the choice to the modern UI's cvar.
+void CG_SpectateFP_ParseServerinfo(const char *info)
+{
+	const char *value = Info_ValueForKey(info, "moharena_firstperson");
+
+	s_fpServerWanted = (value[0] == '1' && !value[1]) ? qtrue : qfalse;
+}
+
 qboolean CG_SpectateFP_Wanted(void)
 {
-	return (cg_spectate_firstperson && cg_spectate_firstperson->integer) ? qtrue : qfalse;
+	// Changed in MoH Arena: the server's switch comes first, the cvar belongs to the modern UI
+	if (s_fpServerWanted) {
+		return qtrue;
+	}
+
+	return (CG_ModernUI() && cg_spectate_firstperson && cg_spectate_firstperson->integer) ? qtrue : qfalse;
 }
 
 qboolean CG_SpectateFP_Active(void)
@@ -150,7 +168,9 @@ void CG_SpectateFP_Update(void)
 		return;
 	}
 
-	if (!(cg.snap->ps.pm_flags & PMF_CAMERA_VIEW)) {
+	// Added in MoH Arena: only a spectator follows a player. A map's scripted camera sets the camera view
+	//  flag for players too, and their STAT_INFOCLIENT names the teammate under the crosshair.
+	if (!(cg.snap->ps.pm_flags & PMF_SPECTATING) || !(cg.snap->ps.pm_flags & PMF_CAMERA_VIEW)) {
 		s_fpLastClient   = -1;
 		s_fpLeanSmoothed = 0.0f;
 		return;
@@ -242,9 +262,34 @@ qboolean CG_SpectateFP_CalcEye(vec3_t outOrigin, vec3_t outAngles)
 	outOrigin[2] += viewHeight;
 
 	if (cg.spectateFp.leanAngle != 0.0f) {
+		trace_t trace;
+		vec3_t  leanEnd;
+
 		AngleVectors(outAngles, NULL, right, NULL);
-		VectorMA(outOrigin, cg.spectateFp.leanAngle * 0.35f, right, outOrigin);
+		VectorMA(outOrigin, cg.spectateFp.leanAngle * 0.35f, right, leanEnd);
 		outAngles[ROLL] += cg.spectateFp.leanAngle * 0.25f;
+
+		/*
+		 * Fixed in Omaha: the lean offset went straight through walls. Sweep the
+		 * same 6-unit eye box as CG_OffsetFirstPersonView so the renderer near
+		 * plane stays clear of geometry.
+		 */
+		// Added in MoH Arena: taken from Omaha (commit bde69d0)
+		VectorSet(mins, -6, -6, -6);
+		VectorSet(maxs, 6, 6, 6);
+		CG_Trace(
+			&trace,
+			outOrigin,
+			mins,
+			maxs,
+			leanEnd,
+			cg.spectateFp.clientNum,
+			MASK_PLAYERSOLID,
+			qfalse,
+			qtrue,
+			"SpectateFP Lean"
+		);
+		VectorCopy(trace.endpos, outOrigin);
 	}
 
 	return qtrue;

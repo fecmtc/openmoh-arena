@@ -718,6 +718,20 @@ static void RB_Hyperspace( void ) {
 }
 
 
+/*
+=================
+RB_SetDepthHackProjection
+
+Added in MoH Arena, from Omaha (commit 35f58e8): the world projection may use a
+reduced near plane, depth-hacked view models keep the configured one
+=================
+*/
+static void RB_SetDepthHackProjection( qboolean depthHack ) {
+	qglMatrixMode(GL_PROJECTION);
+	qglLoadMatrixf( depthHack ? backEnd.viewParms.weaponProjectionMatrix : backEnd.viewParms.projectionMatrix );
+	qglMatrixMode(GL_MODELVIEW);
+}
+
 static void SetViewportAndScissor( void ) {
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( backEnd.viewParms.projectionMatrix );
@@ -952,6 +966,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 				} else {
 					qglDepthRange (0, 1.0);
 				}
+				RB_SetDepthHackProjection( depthRange );	// Added in MoH Arena, from Omaha
 				oldDepthRange = depthRange;
 			}
 
@@ -1032,6 +1047,7 @@ void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	qglLoadMatrixf( backEnd.viewParms.world.modelMatrix );
 	if ( depthRange ) {
 		qglDepthRange (0, 1.0);
+		RB_SetDepthHackProjection( qfalse );	// Added in MoH Arena, from Omaha
 	}
 
 	RB_ShadowFinish();
@@ -1102,6 +1118,7 @@ void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
 			} else {
                 qglDepthRange(0.0, 1.0);
 			}
+            RB_SetDepthHackProjection(depthRange); // Added in MoH Arena, from Omaha
 
             oldDepthRange = depthRange;
         }
@@ -1121,6 +1138,7 @@ void RB_RenderSpriteSurfList(drawSurf_t* drawSurfs, int numDrawSurfs) {
 	// go back to the previous depth range
 	if (depthRange) {
 		qglDepthRange(0.0, 1.0);
+		RB_SetDepthHackProjection(qfalse);	// Added in MoH Arena, from Omaha
 	}
 }
 

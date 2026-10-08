@@ -87,6 +87,13 @@ lists what players see. In short:
   starts the game and the module file has the SHA-256 that Guard gives.
   In any other case the game runs like OpenMoHAA.
 * An [optional modern UI](#optional-modern-ui), off by default.
+* A first-person spectator view that a server can switch on for everyone who
+  follows a player (the serverinfo key `moharena_firstperson`).
+* A weapon command waits until the server has taken the one before, so a fast
+  turn of the mouse wheel no longer drops the weapon on servers of the
+  original game.
+* On Allied Assault servers a crouched player is predicted with the right
+  height, so the view no longer shakes under a low ceiling.
 
 OpenMoH Arena uses the same network protocol as OpenMoHAA, so it joins the
 same servers.

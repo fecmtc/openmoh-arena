@@ -692,8 +692,9 @@ static void MoHArena_FillEngine(void)
     moharenaEngine.cs_players          = CS_PLAYERS;
     moharenaEngine.cs_level_start_time = CS_LEVEL_START_TIME;
     // MoHArena_ServerCommand asks the module's filter about every "print", and in AA its kill_line_color about
-    // every death message.
-    moharenaEngine.features            = MOHARENA_OPM_FEATURE_PRINT_FILTER | MOHARENA_OPM_FEATURE_KILL_COLORS;
+    // every death message. The cgame reads the server's first-person spectator switch (cg_spectate_fp.c).
+    moharenaEngine.features            = MOHARENA_OPM_FEATURE_PRINT_FILTER | MOHARENA_OPM_FEATURE_KILL_COLORS
+                                       | MOHARENA_OPM_FEATURE_SPECTATOR_FIRST_PERSON;
     moharenaEngine.cvar_get            = MoHArena_CvarGet;
     moharenaEngine.cvar_set            = MoHArena_CvarSet;
     moharenaEngine.cvar_register       = MoHArena_CvarRegister;

@@ -59,6 +59,12 @@ static uint32_t CPT_NormalizePlayerStateFlags_ver_6(uint32_t flags)
 
     // Convert AA PlayerMove flags to SH/BT flags
     normalizedFlags |= flags & (1 << 0);
+    // Added in MoH Arena: Allied Assault keeps its second crouch bit in bit 1, where SH/BT keep theirs.
+    //  The original server sets bits 0 and 1 for the crouch (a box 54 units high) and bit 0 alone for the
+    //  crouch run (60 units). Without bit 1 the move prediction took the higher box for every crouch, got
+    //  stuck under ceilings the server walked the player through, and the view shook: the tunnel on The V2.
+    //  Bit 3 still counts as well (the loop below), since servers built before this change send that one.
+    normalizedFlags |= flags & (1 << 1);
     for (size_t i = 1; i < 13; i++) {
         if (flags & (1 << (i + 2))) {
             normalizedFlags |= (1 << i);
@@ -81,6 +87,10 @@ static uint32_t CPT_DenormalizePlayerStateFlags_ver_6(uint32_t flags)
 
     // Convert AA PlayerMove flags to SH/BT flags
     normalizedFlags |= flags & (1 << 0);
+    // Added in MoH Arena: bit 1 is the second crouch bit the original Allied Assault client reads (see
+    //  CPT_NormalizePlayerStateFlags_ver_6). Bit 3 is still sent as well (the loop below), since clients
+    //  built before this change read that one.
+    normalizedFlags |= flags & (1 << 1);
     for (size_t i = 1; i < 13; i++) {
         if (flags & (1 << i)) {
             normalizedFlags |= (1 << (i + 2));

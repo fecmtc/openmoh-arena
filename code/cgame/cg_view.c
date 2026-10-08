@@ -143,14 +143,16 @@ static void CG_OffsetThirdPersonView(void)
     new_vieworg[2] += cg_cameraverticaldisplacement->value;
 
     // Create a bounding box for our camera
+    // Changed in Omaha: match the first-person eye clearance the renderer near plane relies on
+    // Added in MoH Arena: taken from Omaha (commit 35f58e8)
 
-    min[0] = -5;
-    min[1] = -5;
-    min[2] = -5;
+    min[0] = -6;
+    min[1] = -6;
+    min[2] = -6;
 
-    max[0] = 5;
-    max[1] = 5;
-    max[2] = 5;
+    max[0] = 6;
+    max[1] = 6;
+    max[2] = 6;
 
     // Make sure camera does not collide with anything
     CG_Trace(&trace, cg.playerHeadPos, min, max, new_vieworg, 0, MASK_CAMERASOLID, qfalse, qtrue, "ThirdPersonTrace 1");
@@ -703,8 +705,9 @@ static int CG_CalcViewValues(void)
         vec3_t fpOrigin, fpAngles;
 
         /* Added in Omaha: client-side first-person chase override. */
-        // Changed in MoH Arena: first-person spectate belongs to the modern UI
-        if (CG_ModernUI() && CG_SpectateFP_CalcEye(fpOrigin, fpAngles)) {
+        // Added in MoH Arena: in both UIs. CG_SpectateFP_Wanted decides: the server's first-person switch,
+        //  else the modern UI's cvar
+        if (CG_SpectateFP_CalcEye(fpOrigin, fpAngles)) {
             VectorCopy(fpOrigin, cg.refdef.vieworg);
             VectorCopy(fpAngles, cg.refdefViewAngles);
             /* Fixed in Omaha: keep head/sound anchors in sync with FP eye (was chase height). */
@@ -936,10 +939,8 @@ void CG_DrawActiveFrame(int serverTime, int frameTime, stereoFrame_t stereoView,
     CG_PredictPlayerState();
 
     /* Added in Omaha: rebuild FP spectate synthetic state before view/camera. */
-    // Added in MoH Arena: first-person spectate belongs to the modern UI
-    if (CG_ModernUI()) {
-        CG_SpectateFP_Update();
-    }
+    // Added in MoH Arena: in both UIs, for the server's first-person switch (CG_SpectateFP_Wanted)
+    CG_SpectateFP_Update();
 
     // build cg.refdef
     CG_CalcViewValues();

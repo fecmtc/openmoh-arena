@@ -431,6 +431,21 @@ own differences.
   starts the game with `+set ui_legacy 0`. Its files are the pack
   `main/zz_moharena_ui.pk3`. Without the pack the game starts with the
   original UI. See [the modern UI's notes](../../modern-ui/README.md).
+- A first-person spectator view that the server can switch on for everyone:
+  while the serverinfo key `moharena_firstperson` is `1`, a spectator who
+  follows a player sees through that player's eyes, in both UIs. Any other
+  value leaves the choice to the modern UI's own setting. With it come two
+  fixes from Project: Omaha: the lean no longer moves the eye through a
+  wall, and the near plane is pulled in at wide fields of view, so a wall
+  close to the eye is no longer cut open.
+- A weapon command that differs from the one before waits until the server
+  has taken that one. A server of the original game joins the commands of
+  one of its frames, so a fast turn of the mouse wheel (previous, then next)
+  could reach it as "drop weapon".
+- On Allied Assault servers a crouched player is predicted with the right
+  height (54 units, where it was 60). Under a low ceiling, as in the tunnel
+  of The V2, the view no longer shakes. A server built from this code sends
+  the crouch the way the original client reads it.
 
 ## Planned features
 
