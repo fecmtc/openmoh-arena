@@ -222,6 +222,38 @@ void CG_SpectateFP_Update(void)
 	}
 }
 
+/*
+===============
+CG_SpectateFP_SnapOrigin
+
+Added in MoH Arena: where the server put the followed player, blended between the two snapshots.
+The place another player is drawn at (lerpOrigin) runs ahead of that by the player's speed, for up
+to cg_smoothClientsTime (cg_smoothClients). For a player who runs into a wall it is behind the wall
+until the server's speed is the stopped one, and an eye taken from there looked through the wall.
+===============
+*/
+static void CG_SpectateFP_SnapOrigin(const centity_t *cent, vec3_t out)
+{
+	float f;
+	int   i;
+
+	if (!cent->interpolate || !cg.nextSnap) {
+		VectorCopy(cent->currentState.origin, out);
+		return;
+	}
+
+	f = cg.frameInterpolation;
+	if (f < 0.0f) {
+		f = 0.0f;
+	} else if (f > 1.0f) {
+		f = 1.0f;
+	}
+
+	for (i = 0; i < 3; i++) {
+		out[i] = cent->currentState.origin[i] + f * (cent->nextState.origin[i] - cent->currentState.origin[i]);
+	}
+}
+
 qboolean CG_SpectateFP_CalcEye(vec3_t outOrigin, vec3_t outAngles)
 {
 	centity_t *cent;
@@ -258,7 +290,8 @@ qboolean CG_SpectateFP_CalcEye(vec3_t outOrigin, vec3_t outAngles)
 		viewHeight = (float)DEFAULT_VIEWHEIGHT;
 	}
 
-	VectorCopy(cent->lerpOrigin, outOrigin);
+	// Changed in MoH Arena: the server's place of the player, not the drawn one (CG_SpectateFP_SnapOrigin)
+	CG_SpectateFP_SnapOrigin(cent, outOrigin);
 	outOrigin[2] += viewHeight;
 
 	if (cg.spectateFp.leanAngle != 0.0f) {
