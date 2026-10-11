@@ -94,6 +94,13 @@ lists what players see. In short:
   original game.
 * On Allied Assault servers a crouched player is predicted with the right
   height, so the view no longer shakes under a low ceiling.
+* The modern HUD asks a server with flood protection for the scores after an
+  event. It asked every two seconds before, and such a server then dropped a
+  reload or a chat line now and then.
+* The modern UI draws the characters above ASCII in names and chat lines, and
+  text typed into it leaves as Windows-1252, the game's text.
+* A dedicated server built from this code no longer lets a grenade go through
+  terrain (the "nade bug").
 
 OpenMoH Arena uses the same network protocol as OpenMoHAA, so it joins the
 same servers.

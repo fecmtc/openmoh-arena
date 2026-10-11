@@ -1297,6 +1297,9 @@ void CL_SetCGameTime( void ) {
 
 	if( ( cl.snap.snapFlags ^ lastSnapFlags ) & SNAPFLAG_SERVERCOUNT ) {
 		CL_ServerRestarted();
+		// Added in MoH Arena: a game played in rounds restarts the server for
+		//  each round, and a new round starts with everyone alive
+		UIR_Scoreboard_MarkAllAlive();
 	} else {
 		if( cl.snap.serverTime < cl.oldFrameServerTime ) {
 			assert( 0 );

@@ -2409,7 +2409,10 @@ void UID_RegisterCvarBoundProps(uid_node_def_t *node)
 		"opacity", "background-image", "mask-image", "color", "fill", "left", "top", "right", "bottom",
 		"background-scale",
 		/* Added in Omaha: leaf <image> */
-		"src", "fit", "scale"
+		"src", "fit", "scale",
+		/* Added in MoH Arena: the slant of a skew-rect shape, so that a panel with slanted
+		 * sides can follow a size setting (the weapon panel's ui_om_hud_weapon_scale). */
+		"skewl", "skewr"
 	};
 	node->cvarBoundProps.clear();
 	node->exprBoundProps.clear();

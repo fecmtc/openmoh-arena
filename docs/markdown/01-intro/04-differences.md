@@ -446,6 +446,34 @@ own differences.
   height (54 units, where it was 60). Under a low ceiling, as in the tunnel
   of The V2, the view no longer shakes. A server built from this code sends
   the crouch the way the original client reads it.
+- The modern HUD no longer asks the server for the scores every two seconds
+  when the server has flood protection (`sv_floodProtect`) on. Such a server
+  takes one command of a client each second and drops the rest, so the timed
+  request made it drop a reload, a chat line or any other command now and
+  then. The HUD now asks once after an event: the first frame on a map, a
+  new round, the player's own death and the player joining a team. Between
+  the answers a kill message marks its victim as dead in the Arena style's
+  top bar. On a server that says `sv_floodProtect 0` the timer stays, and
+  `ui_om_hud_score_poll 1` brings it back for a client that only watches.
+- The modern UI draws the characters above ASCII. A name or a chat line
+  from the game is Windows-1252, and the UI's two fonts now hold the glyphs
+  of the bytes 128 to 255. Text typed into the modern UI, such as the name
+  on the profile page and a line in the HUD chat, leaves it as Windows-1252
+  too. Before, it left as UTF-8, which the original game shows as two or
+  three wrong characters.
+- A character that a font of the original UI lacks no longer writes a line
+  to the console for each frame. The two messages are for developers now
+  (`developer 1`).
+
+### Server-side
+
+- Grenades no longer go through terrain and explode under the ground (the
+  "nade bug"). The original game gets the point where a small moving object
+  touches a terrain triangle wrong in two ways. It measures the point from
+  the end of the move instead of from the start, so the point lands one whole
+  move too far and the hit is often thrown away. It also takes the point a
+  little before the touch, so a move that only grazes the terrain can be
+  missed. OpenMoHAA has the same code.
 
 ## Planned features
 

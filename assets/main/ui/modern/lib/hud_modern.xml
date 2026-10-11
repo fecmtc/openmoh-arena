@@ -52,37 +52,43 @@
 			  Name line box is ascent*1.4 (Oswald ~16.7 at 14px → ~23.4), not font-size*1.4:
 			  4+23.4+4 ≈ 31.4 → total ≈ 125.4; lock 128 (+2 width/height vs content) so names are not crushed.
 			  stroke-layout=false: stroke is paint-only (same visual ring; no content inset).
+			  Added in MoH Arena: every size below is multiplied by ui_om_hud_weapon_scale
+			  ("Weapon panel size" in the settings), so the numbers above are those of size 1.
+			  A value that starts with its only live expression is cut after that part, and a
+			  constant expression is worked out when the template is expanded, so the paddings
+			  whose other sides are 0 name the setting in a second expression as well.
 			-->
-			<container id="weapons_bar" type="vertical" width="330px" height="128px"
-			           gap="0" padding="6px 0px 0px 0px"
+			<container id="weapons_bar" type="vertical" width="{330 * cvar.ui_om_hud_weapon_scale}px" height="{128 * cvar.ui_om_hud_weapon_scale}px"
+			           gap="0" padding="{6 * cvar.ui_om_hud_weapon_scale}px {0 * cvar.ui_om_hud_weapon_scale}px 0px 0px"
 			           fill="{var.fill-panel}"
-			           shape="skew-rect" skewl="50px" skewr="50px"
+			           shape="skew-rect" skewl="{50 * cvar.ui_om_hud_weapon_scale}px" skewr="{50 * cvar.ui_om_hud_weapon_scale}px"
 			           stroke="{var.fill-divider}" stroke-width="1px" stroke-layout="false" crisp="true"
 			           visible="{(cvar.ui_om_hud_spectator_text == '' or cvar.ui_om_hud_following_text != '') and (cvar.ui_om_hud_weap_pistol_state != 3 or cvar.ui_om_hud_weap_rifle_state != 3 or cvar.ui_om_hud_weap_smg_state != 3 or cvar.ui_om_hud_weap_mg_state != 3 or cvar.ui_om_hud_weap_heavy_state != 3)}">
 
-				<container id="weapons_bar_inner" type="horizontal" width="100%" height="88px"
+				<container id="weapons_bar_inner" type="horizontal" width="100%" height="{88 * cvar.ui_om_hud_weapon_scale}px"
 				           fill="{var.fill-transparent}" halign="end" valign="start">
 
 				<!-- Mute via visible. Image from sources+last_gun; sidearm scale 0.75; 12px outer margin. -->
 					<container id="weapons_bar_weapon_image" type="overlap"
-					           margin="12px 24px 12px 62px" width="192px" height="64px"
+					           margin="{12 * cvar.ui_om_hud_weapon_scale}px {24 * cvar.ui_om_hud_weapon_scale}px {12 * cvar.ui_om_hud_weapon_scale}px {62 * cvar.ui_om_hud_weapon_scale}px"
+					           width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 					           fill="{var.fill-transparent}">
-						<container type="overlap" width="192px" height="64px"
+						<container type="overlap" width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 						           fill="{var.fill-transparent}"
 						           visible="{cvar.ui_om_hud_active_weapon != &quot;&quot; and cvar.ui_om_hud_active_weapon != &quot;Frag Grenade&quot; and cvar.ui_om_hud_active_weapon != &quot;Stielhandgranate&quot;}">
-							<container width="192px" height="64px" fill="{var.fill-transparent}"
+							<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px" fill="{var.fill-transparent}"
 							           source="modern-primary-weapons" bind="cvar:ui_om_hud_last_gun">
-								<foreach mode="selected" width="192px" height="64px">
-									<container width="192px" height="64px"
+								<foreach mode="selected" width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px">
+									<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 									           background-image="{item.field.image}"
 									           background-fit="contain"
 									           fill="{var.fill-transparent}"/>
 								</foreach>
 							</container>
-							<container width="192px" height="64px" fill="{var.fill-transparent}"
+							<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px" fill="{var.fill-transparent}"
 							           source="modern-sidearm-weapons" bind="cvar:ui_om_hud_last_gun">
-								<foreach mode="selected" width="192px" height="64px">
-									<container width="192px" height="64px"
+								<foreach mode="selected" width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px">
+									<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 									           background-image="{item.field.image}"
 									           background-fit="contain"
 									           background-scale="0.75"
@@ -90,23 +96,23 @@
 								</foreach>
 							</container>
 						</container>
-						<container type="overlap" width="192px" height="64px"
+						<container type="overlap" width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 						           fill="{var.fill-transparent}"
 						           opacity="0.5"
 						           visible="{cvar.ui_om_hud_active_weapon == &quot;&quot; or cvar.ui_om_hud_active_weapon == &quot;Frag Grenade&quot; or cvar.ui_om_hud_active_weapon == &quot;Stielhandgranate&quot;}">
-							<container width="192px" height="64px" fill="{var.fill-transparent}"
+							<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px" fill="{var.fill-transparent}"
 							           source="modern-primary-weapons" bind="cvar:ui_om_hud_last_gun">
-								<foreach mode="selected" width="192px" height="64px">
-									<container width="192px" height="64px"
+								<foreach mode="selected" width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px">
+									<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 									           background-image="{item.field.image}"
 									           background-fit="contain"
 									           fill="{var.fill-transparent}"/>
 								</foreach>
 							</container>
-							<container width="192px" height="64px" fill="{var.fill-transparent}"
+							<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px" fill="{var.fill-transparent}"
 							           source="modern-sidearm-weapons" bind="cvar:ui_om_hud_last_gun">
-								<foreach mode="selected" width="192px" height="64px">
-									<container width="192px" height="64px"
+								<foreach mode="selected" width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px">
+									<container width="{192 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 									           background-image="{item.field.image}"
 									           background-fit="contain"
 									           background-scale="0.75"
@@ -117,18 +123,18 @@
 					</container>
 
 					<container id="weapons_bar_ammo_count" type="vertical"
-					           width="50px" height="64px"
+					           width="{50 * cvar.ui_om_hud_weapon_scale}px" height="{64 * cvar.ui_om_hud_weapon_scale}px"
 					           fill="{var.fill-transparent}" valign="start" halign="end">
 						<label id="weapons_bar_total_ammo"
 							   width="100%"
-						       font-size="18px" font-weight="700"
+						       font-size="{18 * cvar.ui_om_hud_weapon_scale}px" font-weight="700"
 						       valign="center" halign="start"
 						       color="{(cvar.ui_om_hud_active_weapon == &quot;&quot; or cvar.ui_om_hud_active_weapon == &quot;Frag Grenade&quot; or cvar.ui_om_hud_active_weapon == &quot;Stielhandgranate&quot;) ? var.color-hud-muted : var.color-white}"
 						       bind="cvar:ui_om_hud_last_gun_ammo"/>
 						<label id="weapons_bar_mag_ammo"
 							   width="100%"
-						       font-size="22px" font-weight="700"
-						       padding="0 40px 0 0"
+						       font-size="{22 * cvar.ui_om_hud_weapon_scale}px" font-weight="700"
+						       padding="0 {40 * cvar.ui_om_hud_weapon_scale}px 0 0"
 						       valign="center" halign="end"
 						       color="{(cvar.ui_om_hud_active_weapon == &quot;&quot; or cvar.ui_om_hud_active_weapon == &quot;Frag Grenade&quot; or cvar.ui_om_hud_active_weapon == &quot;Stielhandgranate&quot;) ? var.color-hud-muted : var.color-white}"
 						       bind="cvar:ui_om_hud_last_gun_clip"/>
@@ -136,31 +142,31 @@
 				</container>
 
 				<container id="weapons_bar_outer" type="horizontal" width="100%" height="fill"
-				           padding="0 38px 0 0" gap="0"
+				           padding="0 {38 * cvar.ui_om_hud_weapon_scale}px 0 0" gap="0"
 				           halign="start" valign="end" fill="{var.fill-transparent}">
 
 					<container id="primary_weapon_name" type="horizontal" width="fill" height="auto"
-					           padding="4px 0"
-					           shape="skew-rect" skewl="11.35px" skewr="11.35px" crisp="true"
+					           padding="{4 * cvar.ui_om_hud_weapon_scale}px {0 * cvar.ui_om_hud_weapon_scale}px"
+					           shape="skew-rect" skewl="{11.35 * cvar.ui_om_hud_weapon_scale}px" skewr="{11.35 * cvar.ui_om_hud_weapon_scale}px" crisp="true"
 					           stroke-layout="false"
 					           stroke="{var.fill-divider}" stroke-width="1px"
 					           fill="{cvar.ui_om_hud_last_gun == cvar.ui_om_hud_primary_name ? var.fill-panel : var.fill-transparent}"
 					           visible="{cvar.ui_om_hud_weap_rifle_state == 1 or cvar.ui_om_hud_weap_rifle_state == 2 or cvar.ui_om_hud_weap_smg_state == 1 or cvar.ui_om_hud_weap_smg_state == 2 or cvar.ui_om_hud_weap_mg_state == 1 or cvar.ui_om_hud_weap_mg_state == 2 or cvar.ui_om_hud_weap_heavy_state == 1 or cvar.ui_om_hud_weap_heavy_state == 2}">
-						<label width="fill" font-size="14px" font-weight="700"
+						<label width="fill" font-size="{14 * cvar.ui_om_hud_weapon_scale}px" font-weight="700"
 						       halign="center" valign="center"
 						       color="{cvar.ui_om_hud_last_gun == cvar.ui_om_hud_primary_name ? var.color-white : var.color-hud-muted}"
 						       bind="cvar:ui_om_hud_primary_name"/>
 					</container>
 
 					<container id="secondary_weapon_name" type="horizontal" width="fill" height="auto"
-					           padding="4px 0"
-					           margin="{(cvar.ui_om_hud_weap_rifle_state != 3 or cvar.ui_om_hud_weap_smg_state != 3 or cvar.ui_om_hud_weap_mg_state != 3 or cvar.ui_om_hud_weap_heavy_state != 3) ? 0px 0px 0px -12px : 0}"
-					           shape="skew-rect" skewl="11.35px" skewr="11.35px" crisp="true"
+					           padding="{4 * cvar.ui_om_hud_weapon_scale}px {0 * cvar.ui_om_hud_weapon_scale}px"
+					           margin="0 0 0 {0 - 12 * cvar.ui_om_hud_weapon_scale * min(1, abs(cvar.ui_om_hud_weap_rifle_state - 3) + abs(cvar.ui_om_hud_weap_smg_state - 3) + abs(cvar.ui_om_hud_weap_mg_state - 3) + abs(cvar.ui_om_hud_weap_heavy_state - 3))}px"
+					           shape="skew-rect" skewl="{11.35 * cvar.ui_om_hud_weapon_scale}px" skewr="{11.35 * cvar.ui_om_hud_weapon_scale}px" crisp="true"
 					           stroke-layout="false"
 					           stroke="{var.fill-divider}" stroke-width="1px"
 					           fill="{cvar.ui_om_hud_last_gun == cvar.ui_om_hud_sidearm_name ? var.fill-panel : var.fill-transparent}"
 					           visible="{cvar.ui_om_hud_weap_pistol_state == 1 or cvar.ui_om_hud_weap_pistol_state == 2}">
-						<label width="fill" font-size="14px" font-weight="700"
+						<label width="fill" font-size="{14 * cvar.ui_om_hud_weapon_scale}px" font-weight="700"
 						       halign="center" valign="center"
 						       color="{cvar.ui_om_hud_last_gun == cvar.ui_om_hud_sidearm_name ? var.color-white : var.color-hud-muted}"
 						       bind="cvar:ui_om_hud_sidearm_name"/>

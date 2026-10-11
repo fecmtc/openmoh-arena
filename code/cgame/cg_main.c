@@ -720,6 +720,8 @@ void CG_ServerRestarted(void)
     CG_ResetVSSSources();
     // Reset objectives
     CG_InitializeObjectives();
+    // Added in MoH Arena: a new round changes the scores that the HUD shows
+    CG_HudTeamScoresWanted();
 }
 
 /*

@@ -256,6 +256,9 @@
 								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
 								<use template="settings-slider-row" label="Top bar size" bind="cvar:ui_om_hud_topbar_scale" min="0.5" max="2" step="0.05" commit="change"
 								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
+								<!-- Added in MoH Arena: the "Modern" style has the same weapon panel, so this row is shown for both. -->
+								<use template="settings-slider-row" label="Weapon panel size" bind="cvar:ui_om_hud_weapon_scale" min="0.5" max="2" step="0.05" commit="change"
+								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == modern)}"/>
 								<use template="settings-slider-row" label="Kill feed text size" bind="cvar:ui_om_hud_killfeed_size" min="10" max="32" step="1" commit="change"
 								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
 								<use template="settings-slider-row" label="Messages text size" bind="cvar:ui_om_hud_messages_size" min="10" max="32" step="1" commit="change"

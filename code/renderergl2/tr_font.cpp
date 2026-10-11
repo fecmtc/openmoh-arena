@@ -832,7 +832,9 @@ void R_DrawFloatingString_sgl(fontheader_sgl_t* font, const char* text, const ve
         indirected = font->indirection[c];
         if (indirected == -1)
         {
-            ri.Printf(PRINT_ALL, "R_DrawFloatingString: no 0x%02x-character in font!\n", c);
+            // Changed in MoH Arena: for developers only, as in R_DrawString. A name can hold a
+            // character that a font of the game lacks, and the console got a line for each frame
+            ri.Printf(PRINT_DEVELOPER, "R_DrawFloatingString: no 0x%02x-character in font!\n", c);
             continue;
         }
 
@@ -932,7 +934,8 @@ float R_GetFontStringWidth_sgl(const fontheader_sgl_t* font, const char* s)
             if (indirected != -1) {
                 widths += font->locations[indirected].size[0];
             } else {
-                ri.Printf(PRINT_ALL, "R_GetFontStringWidth: no 0x%02x-character in font!\n", c);
+                // Changed in MoH Arena: for developers only, see R_DrawFloatingString
+                ri.Printf(PRINT_DEVELOPER, "R_GetFontStringWidth: no 0x%02x-character in font!\n", c);
             }
         }
     }

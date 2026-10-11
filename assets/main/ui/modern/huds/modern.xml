@@ -164,7 +164,9 @@
 							{cvar.ui_om_hud_spectator_text}
 						</label>
 					</container>
-					<container id="hud_bottom_row_right" type="horizontal" width="fill" height="auto" gap="12px"
+					<!-- Added in MoH Arena: the gap grows with the weapon panel ("Weapon panel size"). -->
+					<container id="hud_bottom_row_right" type="horizontal" width="fill" height="auto"
+							gap="{12 * cvar.ui_om_hud_weapon_scale}px"
 							halign="end" valign="end"
 							visible="{cvar.ui_om_hud_show}">
 						<use id="grenade_inventory" template="modern-grenade-inventory"/>

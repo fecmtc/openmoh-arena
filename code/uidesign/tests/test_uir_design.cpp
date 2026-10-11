@@ -8284,7 +8284,7 @@ static void RegisterTestSettingsCvars(FakeBackendState &st)
 		"ui_modernsettings_dpi", "ui_modernsettings_sensitivity_mode",
 		// Added in MoH Arena: the sizes of the parts of the "arena" HUD style
 		"ui_om_hud_compass_scale", "ui_om_hud_topbar_scale", "ui_om_hud_killfeed_size",
-		"ui_om_hud_messages_size", "ui_om_hud_chat_size",
+		"ui_om_hud_messages_size", "ui_om_hud_chat_size", "ui_om_hud_weapon_scale",
 		nullptr,
 	};
 

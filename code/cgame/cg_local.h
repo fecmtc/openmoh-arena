@@ -952,6 +952,8 @@ qboolean CG_LightStyleColor(int style, int realtime, vec4_t color, qboolean clam
     void CG_InitScoresAPI(clientGameExport_t *cge);
     /* Added in Omaha: silent team-score refresh for modern HUD Allied/Axis strip. */
     void CG_RequestHudTeamScoresSilent(void);
+    /* Added in MoH Arena: asks for one score reply after an event, see cg_scoreboard.cpp. */
+    void CG_HudTeamScoresWanted(void);
 
     //
     // cg_specialfx.cpp

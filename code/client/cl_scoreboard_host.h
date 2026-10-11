@@ -73,6 +73,13 @@ int  UIR_Scoreboard_GetRowCount(void);
 const uir_scoreboard_row_t *UIR_Scoreboard_GetRow(int index);
 uint64_t UIR_Scoreboard_GetRevision(void);
 
+/*
+ * Added in MoH Arena: the rows' dead marks between two score replies, so the
+ * HUD needs no score request on a timer for them.
+ */
+void UIR_Scoreboard_MarkDeadByName(const char *name);
+void UIR_Scoreboard_MarkAllAlive(void);
+
 void UIR_Scoreboard_FormatKd(int kills, int deaths, char *out, size_t outSize);
 void UIR_Scoreboard_Vec4ToHex(const float *rgba, char *out, size_t outSize);
 void UIR_Scoreboard_ApplySortColumn(const char *column);

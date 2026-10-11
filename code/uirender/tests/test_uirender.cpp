@@ -27,6 +27,7 @@ source tree, or write to the Free Software Foundation, Inc.,
 #include "../uir_path.h"
 #include "../uir_svg.h"
 #include "../uir_font.h"
+#include "../uir_cp1252.h"
 #include "../uir_gradient.h"
 #include "../uir_image.h"
 #include "../uir_modelpreview.h"
@@ -42,6 +43,7 @@ source tree, or write to the Free Software Foundation, Inc.,
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -492,6 +494,115 @@ static void test_font_math()
 	CHECK(u1 < 1.0f && v1 < 1.0f);
 	CHECK_NEAR(UIR_FontEmScale(48.0f, 1000), 0.048f, 1e-5);
 	CHECK_NEAR(UIR_FontEmScale(48.0f, 0), 0.0f, 1e-8);
+}
+
+/* Added in MoH Arena: the font of the next test reads its file from the source tree. */
+static long test_font_read_file(const char *path, void **buffer)
+{
+	std::FILE *file = std::fopen(path, "rb");
+	long length = 0;
+
+	*buffer = NULL;
+	if (!file) {
+		return -1;
+	}
+	if (!std::fseek(file, 0, SEEK_END)) {
+		length = std::ftell(file);
+	}
+	std::rewind(file);
+	if (length > 0) {
+		*buffer = std::malloc((size_t)length);
+		if (!*buffer || std::fread(*buffer, 1, (size_t)length, file) != (size_t)length) {
+			std::free(*buffer);
+			*buffer = NULL;
+			length = -1;
+		}
+	}
+	std::fclose(file);
+	return length;
+}
+
+static void test_font_free_file(void *buffer)
+{
+	std::free(buffer);
+}
+
+static int test_font_create_atlas(const char *name, const unsigned char *rgba, int width, int height)
+{
+	(void)name;
+	(void)rgba;
+	(void)width;
+	(void)height;
+	return 1;
+}
+
+/*
+ * Added in MoH Arena: a name from the game is Windows-1252 and the UI's own text
+ * is UTF-8. The font reads both and has the characters above ASCII.
+ */
+static void test_font_cp1252()
+{
+	unsigned char byte = 0;
+	char out[16];
+	uir_font_backend_t backend;
+	uir_font_t *font;
+
+	CHECK(UIR_Cp1252Next("a", &byte) == 1 && byte == 'a');
+	/* a right guillemet and a trademark sign, as the game sends them */
+	CHECK(UIR_Cp1252Next("\xBB", &byte) == 1 && byte == 0xBB);
+	CHECK(UIR_Cp1252Next("\x99", &byte) == 1 && byte == 0x99);
+	/* the same two as UTF-8 */
+	CHECK(UIR_Cp1252Next("\xC2\xBB", &byte) == 2 && byte == 0xBB);
+	CHECK(UIR_Cp1252Next("\xE2\x84\xA2", &byte) == 3 && byte == 0x99);
+	/* well-formed UTF-8 of a character that Windows-1252 lacks: two bytes of a name */
+	CHECK(UIR_Cp1252Next("\xC9\xAE", &byte) == 1 && byte == 0xC9);
+	/* a sequence that ends early, and one that a shorter sequence could have written */
+	CHECK(UIR_Cp1252Next("\xC3", &byte) == 1 && byte == 0xC3);
+	CHECK(UIR_Cp1252Next("\xE0\x82\xBB", &byte) == 1 && byte == 0xE0);
+	CHECK(UIR_Cp1252FromCodepoint(0x20AC) == 0x80);
+	CHECK(UIR_Cp1252FromCodepoint(0x0100) == 0);
+	CHECK(UIR_Cp1252ToCodepoint(0x99) == 0x2122);
+	CHECK(UIR_Cp1252ToCodepoint(0x81) == 0);
+
+	UIR_Cp1252FromText("a\xC2\xBB\xE2\x84\xA2\xC9\xAE", out, sizeof(out));
+	CHECK(!std::strcmp(out, "a\xBB\x99\xC9\xAE"));
+	/* the output is cut at its size */
+	UIR_Cp1252FromText("\xC3\xA9t\xC3\xA9", out, 3);
+	CHECK(!std::strcmp(out, "\xE9t"));
+
+	std::memset(&backend, 0, sizeof(backend));
+	backend.createAtlas = test_font_create_atlas;
+	backend.readFile = test_font_read_file;
+	backend.freeFile = test_font_free_file;
+	UIR_FontSetBackend(&backend);
+	font = UIR_FontLoad(UIR_TEST_FONT_DIR "/Oswald-Medium.ttf", 32.0f);
+	CHECK(font != NULL);
+	if (font) {
+		const float question = UIR_FontGlyphAdvance(font, '?');
+
+		/* glyphs of their own, not the question mark's */
+		CHECK(std::fabs(UIR_FontGlyphAdvance(font, 0xBB) - question) > 0.01f);
+		CHECK(std::fabs(UIR_FontGlyphAdvance(font, 0x99) - question) > 0.01f);
+		/* a byte without a character */
+		CHECK_NEAR(UIR_FontGlyphAdvance(font, 0x81), question, 1e-4);
+		/* both encodings of one text have one width */
+		CHECK_NEAR(
+			UIR_FontMeasure(font, "\xBB \x99", 0.0f), UIR_FontMeasure(font, "\xC2\xBB \xE2\x84\xA2", 0.0f), 1e-4
+		);
+		CHECK_NEAR(
+			UIR_FontMeasure(font, "\xC9\xAE", 0.0f),
+			UIR_FontGlyphAdvance(font, 0xC9) + UIR_FontGlyphAdvance(font, 0xAE),
+			1e-4
+		);
+		/* tracking goes between two characters, not between two bytes */
+		CHECK_NEAR(UIR_FontMeasure(font, "\xC2\xBB", 2.0f), UIR_FontGlyphAdvance(font, 0xBB), 1e-4);
+		/* ASCII as before */
+		CHECK_NEAR(
+			UIR_FontMeasure(font, "ab", 0.0f), UIR_FontGlyphAdvance(font, 'a') + UIR_FontGlyphAdvance(font, 'b'), 1e-4
+		);
+		UIR_FontRelease(font);
+	}
+	UIR_FontSetBackend(NULL);
 }
 
 static void test_path_stroke()
@@ -2283,6 +2394,7 @@ int main()
 	test_menu_weather_skip_without_density();
 	test_menu_weather_spawns_from_script_density();
 	test_font_math();
+	test_font_cp1252();
 	test_image_fit_math();
 	test_image_repeat_tiling();
 	test_image_rotation_quad();

@@ -189,6 +189,8 @@ static const moharenaUISetting_t moharenaUISettings[] = {
     {"ui_om_hud_killfeed_size",            MOHARENA_UI_WHOLE,     10,     32,                   NULL,                       qtrue },
     {"ui_om_hud_messages_size",            MOHARENA_UI_WHOLE,     10,     32,                   NULL,                       qtrue },
     {"ui_om_hud_chat_size",                MOHARENA_UI_WHOLE,     10,     32,                   NULL,                       qtrue },
+    // The size of the weapon panel of the "arena" and "modern" HUD styles
+    {"ui_om_hud_weapon_scale",             MOHARENA_UI_NUMBER,    0.5,    2,                    NULL,                       qtrue },
     {"cg_drawviewmodel",                   MOHARENA_UI_WHOLE,     0,      2,                    NULL,                       qtrue },
     {"ui_weaponsbar",                      MOHARENA_UI_WHOLE,     0,      2,                    NULL,                       qtrue },
     {"ui_om_scoreboard_disable_cursor",    MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },

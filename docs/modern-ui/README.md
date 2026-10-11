@@ -129,13 +129,14 @@ together from them:
 - from "Modern": the weapon panel.
 
 It also shows the vote prompt, the name and health of the player under the
-crosshair and the voice message menu. Five settings size its parts. Their rows
+crosshair and the voice message menu. Six settings size its parts. Their rows
 are on the settings page while "Arena" is the chosen style:
 
 | Row | Setting | Range | Default |
 |-----|---------|-------|---------|
 | Compass size | `ui_om_hud_compass_scale` | 0.5 to 2 | 1 |
 | Top bar size | `ui_om_hud_topbar_scale` | 0.5 to 2 | 1 |
+| Weapon panel size | `ui_om_hud_weapon_scale` | 0.5 to 2 | 1 |
 | Kill feed text size | `ui_om_hud_killfeed_size` | 10 to 32 | 16 |
 | Messages text size | `ui_om_hud_messages_size` | 10 to 32 | 16 |
 | Chat text size | `ui_om_hud_chat_size` | 10 to 32 | 16 |
@@ -144,6 +145,32 @@ The three text sizes are in pixels on a 1920 x 1080 screen, and follow the
 resolution and "UI Scale" like the rest of the modern UI. The squares of the
 top bar get smaller when a team has more than 12 players, so the bar keeps its
 width.
+
+The weapon panel is the one of "Modern", so the row "Weapon panel size" is on
+the settings page while "Modern" is the chosen style as well. The panel, the
+grenade box next to it and the space between them grow and shrink from the
+bottom right corner of the screen. "Classic" and "Competitive" have weapon
+panels of their own, which the setting does not size. For this the slant of a
+`skew-rect` shape (`skewl`, `skewr`) follows a setting while the HUD is shown,
+like a width does.
+
+The squares of the top bar and both teams' totals come from the server's
+score list. On a server with flood protection (`sv_floodProtect`) the HUD
+asks for that list once after an event: the first frame on a map, a new
+round, the player's own death and the player joining a team. It asked every
+two seconds before, and such a server takes one command of a client each
+second, so it dropped a reload or a chat line now and then. Between two
+lists a kill message marks its victim as dead. A client that only watches,
+such as a match camera, can set `ui_om_hud_score_poll 1` to get the list
+every two seconds again. On a server that says `sv_floodProtect 0` the
+timer stays as it was.
+
+A name or a chat line from the game is Windows-1252, one byte for each
+character, and the modern UI's own text is UTF-8. The UI's fonts draw both
+and hold the glyphs of the bytes 128 to 255. The font atlas has one size,
+so in text larger than 96 pixels on the screen some of these characters
+are drawn as a question mark. Text typed into a field leaves the UI as
+Windows-1252: the name on the profile page and a line in the HUD chat.
 
 `ui_compass_scale` of the original game sizes the original compass only. No
 style of the modern UI reads it.

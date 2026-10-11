@@ -33,6 +33,10 @@ add_executable(test_uirender
 )
 
 target_include_directories(test_uirender PRIVATE ${SOURCE_DIR}/uirender ${SOURCE_DIR}/uidesign ${SOURCE_DIR}/qcommon ${LIBTESS2_INCLUDES})
+# Added in MoH Arena: the font test reads a TTF of the modern UI
+target_compile_definitions(test_uirender PRIVATE
+    "UIR_TEST_FONT_DIR=\"${CMAKE_SOURCE_DIR}/assets/main/fonts\""
+)
 add_test(NAME test_uirender COMMAND test_uirender)
 set_tests_properties(test_uirender PROPERTIES TIMEOUT 30)
 

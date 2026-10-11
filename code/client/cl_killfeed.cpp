@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cl_killfeed.h"
 #include "cl_messages_host.h"
+#include "cl_scoreboard_host.h"
 #include "client.h"
 
 #include <cstring>
@@ -162,6 +163,10 @@ static void CL_KillFeed_AddStructuredRow(
 
 	UIR_HudKillFeed_AddRow(&row);
 	UIR_HudKillFeed_NotifyChanged();
+
+	// Added in MoH Arena: the HUD's player squares learn of a death from its
+	//  message, so the HUD needs no score request on a timer for them
+	UIR_Scoreboard_MarkDeadByName(victim);
 }
 
 void CL_KillFeed_HandlePrintDeathMsg(void)

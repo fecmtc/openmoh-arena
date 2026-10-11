@@ -486,6 +486,86 @@ void UIR_Scoreboard_NotifyChanged(void)
 	UIR_Scoreboard_PublishRosterCvars();
 }
 
+/*
+ * Added in MoH Arena: a name as a scoreboard row and a death message carry it,
+ * without colour codes, so that the two can be compared.
+ */
+static void UIR_Scoreboard_CleanName(const char *name, char *out, size_t outSize)
+{
+	out[0] = '\0';
+	Com_SanitizeName(name, out, outSize);
+	if (!out[0]) {
+		Q_strncpyz(out, name, outSize);
+	}
+	Q_CleanStr(out);
+}
+
+/*
+ * Added in MoH Arena: a death message marks the victim's row dead in the games
+ * played in rounds. The HUD draws one square per player from these rows, and the
+ * server says who is dead only in a score reply. Asking for one on a timer costs
+ * the player commands of their own on a server with flood protection (see
+ * CG_RequestHudTeamScoresSilent), so between two replies the marks follow the
+ * death messages. Replies and death messages arrive in one ordered stream, so a
+ * later reply never brings back an older state.
+ */
+void UIR_Scoreboard_MarkDeadByName(const char *name)
+{
+	char want[64];
+	int  i;
+
+	if (!MoHArena_ModernUI()) {
+		return;
+	}
+	if (!name || !name[0] || !g_scoreboardMeta.roundMode) {
+		return;
+	}
+	UIR_Scoreboard_CleanName(name, want, sizeof(want));
+	if (!want[0]) {
+		return;
+	}
+	for (i = 0; i < g_scoreboardCount; i++) {
+		uir_scoreboard_row_t *row = &g_scoreboardRows[i];
+		char                  have[64];
+
+		if (row->kind != UIR_SCORE_ROW_PLAYER || row->isHeader || row->isSpectator || row->isDead) {
+			continue;
+		}
+		UIR_Scoreboard_CleanName(row->name, have, sizeof(have));
+		if (!have[0] || Q_stricmp(have, want) != 0) {
+			continue;
+		}
+		row->isDead = qtrue;
+		UIR_Scoreboard_NotifyChanged();
+		return;
+	}
+}
+
+/*
+ * Added in MoH Arena: a new round starts with everyone alive. The client calls
+ * this when the server restarted, which is how a game played in rounds starts
+ * each round. The score reply that the HUD asks for at that moment replaces the
+ * rows a moment later.
+ */
+void UIR_Scoreboard_MarkAllAlive(void)
+{
+	qboolean changed = qfalse;
+	int      i;
+
+	if (!MoHArena_ModernUI()) {
+		return;
+	}
+	for (i = 0; i < g_scoreboardCount; i++) {
+		if (g_scoreboardRows[i].isDead) {
+			g_scoreboardRows[i].isDead = qfalse;
+			changed                    = qtrue;
+		}
+	}
+	if (changed) {
+		UIR_Scoreboard_NotifyChanged();
+	}
+}
+
 void UIR_Scoreboard_ApplySortColumn(const char *column)
 {
 	const uir_scoreboard_sort_t next = UIR_Scoreboard_SortFromColumn(column);

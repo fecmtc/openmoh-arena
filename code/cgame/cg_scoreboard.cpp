@@ -51,18 +51,89 @@ static void CG_Hud_SetTeamScoreCvar(int team, const char *scoreField)
 }
 
 /*
+ * Added in MoH Arena: something happened that changes what the HUD shows from a
+ * score reply, so the next call of CG_RequestHudTeamScoresSilent asks for one.
+ */
+static qboolean cg_hudTeamScoresWanted = qtrue;
+
+void CG_HudTeamScoresWanted(void)
+{
+    cg_hudTeamScoresWanted = qtrue;
+}
+
+/*
+ * Added in MoH Arena: whether the HUD may ask for the scores on a timer, as it
+ * did before. That is harmless on a server whose info says sv_floodProtect is 0,
+ * and it is wanted with ui_om_hud_score_poll 1, which is meant for a client that
+ * only watches, such as a match camera.
+ */
+static qboolean CG_HudTeamScoresOnTimer(void)
+{
+    static cvar_t *poll = NULL;
+    const char    *flood;
+
+    if (!poll) {
+        poll = cgi.Cvar_Get("ui_om_hud_score_poll", "0", 0);
+    }
+    if (poll && poll->integer) {
+        return qtrue;
+    }
+    flood = Info_ValueForKey(CG_ConfigString(CS_SERVERINFO), "sv_floodProtect");
+    return flood[0] && !atoi(flood);
+}
+
+/*
  * Added in Omaha: request scores without opening the scoreboard. Reuses the retail
  * 2s throttle on cg.scoresRequestTime so TAB and the HUD strip share one budget.
+ *
+ * Changed in MoH Arena: no request on a timer on a server with flood protection.
+ * With sv_floodProtect the server drops every command that a client sends within
+ * one second of its command before. A request every two seconds therefore cost
+ * the player about every second command of their own: the reload key did
+ * nothing, a chat line never arrived. The HUD now asks once when something
+ * happened that changes what it shows from a reply: the first frame on a map, a
+ * server restart (a new round), the player's own death, and the player joining a
+ * team. Between two replies the client marks the dead from the death messages
+ * (UIR_Scoreboard_MarkDeadByName), and the total of the player's own team comes
+ * with every snapshot.
  */
 void CG_RequestHudTeamScoresSilent(void)
 {
+    static qboolean wasPlaying = qfalse;
+    static int      lastTeam   = TEAM_NONE;
+
     if (cgs.gametype <= GT_FFA) {
         return;
     }
+
+    if (cg.snap) {
+        const playerState_t *ps      = &cg.snap->ps;
+        const qboolean       playing = !(ps->pm_flags & PMF_SPECTATING) && ps->stats[STAT_HEALTH] > 0;
+
+        if (wasPlaying && !playing) {
+            // the player died
+            cg_hudTeamScoresWanted = qtrue;
+        }
+        if (playing && ps->stats[STAT_TEAM] != lastTeam) {
+            // the player joined a team
+            lastTeam               = ps->stats[STAT_TEAM];
+            cg_hudTeamScoresWanted = qtrue;
+        }
+        wasPlaying = playing;
+    }
+    if (!cg.scoresRequestTime) {
+        // nothing was asked for on this map yet
+        cg_hudTeamScoresWanted = qtrue;
+    }
+
     if (cg.scoresRequestTime && cg.scoresRequestTime + 2000 >= cg.time) {
         return;
     }
-    cg.scoresRequestTime = cg.time;
+    if (!cg_hudTeamScoresWanted && !CG_HudTeamScoresOnTimer()) {
+        return;
+    }
+    cg_hudTeamScoresWanted = qfalse;
+    cg.scoresRequestTime   = cg.time;
     cgi.SendClientCommand("score");
 }
 

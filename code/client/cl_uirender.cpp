@@ -106,6 +106,8 @@ static int CL_UIR_ApplyDmPauseClickGate(int buttons)
 #include "../uirender/uir_backend.h"
 #include "../uirender/uir_batch.h"
 #include "../uirender/uir_compositor.h"
+// Added in MoH Arena: the game's text is Windows-1252, the modern UI's is UTF-8
+#include "../uirender/uir_cp1252.h"
 #include "../uirender/uir_draw2d.h"
 #include "../uirender/uir_font.h"
 #include "../uirender/uir_gradient.h"
@@ -3981,7 +3983,12 @@ static bool invoke_apply_profile(void *userdata)
 	uid_write_all_doc_bindings();
 	playerName = Cvar_VariableString("ui_name");
 	if (playerName && playerName[0]) {
-		Cvar_Set("name", playerName);
+		// Added in MoH Arena: what was typed into the field is UTF-8, and the game's
+		// name is Windows-1252, which is what every other player's game draws
+		char szGameName[MAX_STRING_CHARS];
+
+		UIR_Cp1252FromText(playerName, szGameName, sizeof(szGameName));
+		Cvar_Set("name", szGameName);
 	}
 	return true;
 }
@@ -4404,6 +4411,8 @@ static bool invoke_hud_chat_submit(void *userdata)
 	}
 	// Added in MoH Arena: the typed text goes out without control characters
 	MoHArena_UIPlainText(CL_UIVar_String("ui_om_hud_chat_text"), szPlain, sizeof(szPlain));
+	// Added in MoH Arena: and as Windows-1252, the game's text, instead of the UTF-8 of the field
+	UIR_Cp1252FromText(szPlain, szPlain, sizeof(szPlain));
 	txt = szPlain;
 	if (txt[0]) {
 		/* Match DMConsoleCommandHandler: all→0, team→-1, else client index. */
@@ -6015,6 +6024,12 @@ void CL_UIR_RegisterCvars(void)
 	Cvar_CheckRange(Cvar_Get("ui_om_hud_killfeed_size", "16", CVAR_ARCHIVE), 10, 32, qtrue);
 	Cvar_CheckRange(Cvar_Get("ui_om_hud_messages_size", "16", CVAR_ARCHIVE), 10, 32, qtrue);
 	Cvar_CheckRange(Cvar_Get("ui_om_hud_chat_size", "16", CVAR_ARCHIVE), 10, 32, qtrue);
+	/*
+	 * Added in MoH Arena: the size of the weapon panel of the "arena" and "modern"
+	 * HUD styles. The panel's layout multiplies with it, and a setting that does
+	 * not exist reads as 0 there, so it is registered here with the others.
+	 */
+	Cvar_CheckRange(Cvar_Get("ui_om_hud_weapon_scale", "1", CVAR_ARCHIVE), 0.5f, 2, qfalse);
 	/*
 	 * Fixed in Omaha: cache legacy flags before UseModernHudPack(). That helper
 	 * calls UseLegacyHud(), which re-enters RegisterCvars while g_legacyCached

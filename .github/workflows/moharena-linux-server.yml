@@ -1,0 +1,129 @@
+##########################
+#
+# Added in MoH Arena
+#
+# The Linux x86-64 dedicated server (omohaaded and game.so) for the
+# OpenMoHAA servers of MoH Arena. Server only: no client, no renderer
+# and no test programs.
+# Ubuntu 22.04, like shared-build-linux.yml, for a lower GLIBC version (2.35).
+# The server loads libcurl.so.4 when it runs, so curl is not built here.
+#
+##########################
+name: "MoH Arena Linux Server Build"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'main'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: RelWithDebInfo
+  RELEASE_STAGE: ${{ vars.RELEASE_STAGE || 'unstable' }}
+
+jobs:
+  build:
+    name: "Building the server for linux-amd64"
+    runs-on: ubuntu-22.04
+
+    steps:
+    ###
+    # Packages
+    ###
+
+    - name: Install required packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends flex bison ninja-build clang
+
+    - name: Settings
+      working-directory: ${{github.workspace}}
+      run: |
+        echo "CMAKE_GENERATOR=Ninja Multi-Config" >> $GITHUB_ENV
+        echo "CC=clang" >> $GITHUB_ENV
+        echo "CXX=clang++" >> $GITHUB_ENV
+
+    ###
+    # Project
+    ###
+
+    - uses: actions/checkout@v4
+      with:
+        path: 'source'
+
+    - name: CMake Settings
+      run: |
+        echo "CMAKE_PARAM=--log-level=VERBOSE \
+        -DCMAKE_INSTALL_PREFIX='${{github.workspace}}/install' \
+        -DBUILD_CLIENT=OFF \
+        -DBUILD_TESTING=OFF \
+        -DGIT_REVISION_BUILD_NUMBER=${{ github.run_number }} \
+        -DPRODUCT_VERSION_STAGE='${{ env.RELEASE_STAGE }}'" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      working-directory: ${{github.workspace}}
+      run: |
+        cmake -B ./build ${{ env.CMAKE_PARAM }} ./source
+
+    - name: Build
+      working-directory: ${{github.workspace}}
+      run: |
+        cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel
+
+    - name: Install
+      working-directory: ${{github.workspace}}
+      # Install to the directory defined in CMAKE_INSTALL_PREFIX
+      run: |
+        cmake --install ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+        mkdir ${{github.workspace}}/package
+        if [ -d ${{github.workspace}}/install/bin ]; then cp -r ${{github.workspace}}/install/bin/openmohaa/. '${{github.workspace}}/package'; fi
+        if [ -d ${{github.workspace}}/install/lib ]; then cp -r ${{github.workspace}}/install/lib/openmohaa/. '${{github.workspace}}/package'; fi
+
+    # The servers install only the C and C++ libraries of the system, so the
+    # two files must need nothing else. The version and the SHA-256 of both
+    # files go to the summary of the run.
+    - name: MoH Arena server files
+      working-directory: ${{github.workspace}}/package
+      run: |
+        for File in omohaaded game.so; do
+          if [ ! -f "$File" ]; then echo "::error::$File is missing from the package"; exit 1; fi
+        done
+        for File in omohaaded game.so; do
+          Needed=$(objdump -p "$File" | awk '$1 == "NEEDED" { print $2 }' | sort | tr '\n' ' ')
+          echo "$File needs: $Needed"
+          for Library in $Needed; do
+            case "$Library" in
+              libc.so.6|libm.so.6|libdl.so.2|libpthread.so.0|libstdc++.so.6|libgcc_s.so.1) ;;
+              *) echo "::error::$File needs $Library, which the servers do not have"; exit 1 ;;
+            esac
+          done
+        done
+        Version=$(strings -a omohaaded | grep -m 1 -oE '[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9]+)?\+[0-9]+(\.[0-9a-f]+)?' || true)
+        echo "Version: ${Version:-not found}"
+        sha256sum omohaaded game.so > SHA256SUMS.txt
+        {
+          echo "### linux-amd64 server SHA-256"
+          echo '```'
+          echo "version ${Version:-not found}"
+          cat SHA256SUMS.txt
+          echo '```'
+        } >> $GITHUB_STEP_SUMMARY
+
+    ###
+    # Artifacts
+    ###
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: out-linux-server-amd64
+        if-no-files-found: error
+        compression-level: 9
+        path:
+          ${{github.workspace}}/package

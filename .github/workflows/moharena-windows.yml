@@ -15,8 +15,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - 'moharena-native-bridge'
-      - 'moharena-omaha-ui'
+      - 'main'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

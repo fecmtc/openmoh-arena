@@ -578,6 +578,7 @@ float CM_CheckTerrainTriSphere(pointtrace_t *pt, float x0, float y0, int iPlane)
     float    fMaxFraction;
     float    d1, d2;
     float    fSpherePlane;
+    float    fContact;
     int      eMode;
     qboolean bFitsX, bFitsY;
     qboolean bFitsDiag;
@@ -636,8 +637,25 @@ float CM_CheckTerrainTriSphere(pointtrace_t *pt, float x0, float y0, int iPlane)
         return pt->tw->trace.fraction;
     }
 
-    d1 = (pt->vEnd[0] - pt->vStart[0]) * fSpherePlane + pt->vEnd[0] - sphere.radius * plane[0] - x0;
-    d2 = (pt->vEnd[1] - pt->vStart[1]) * fSpherePlane + pt->vEnd[1] - sphere.radius * plane[1] - y0;
+    // Fixed in MoH Arena: the contact point is where the sphere touches the plane.
+    //  fSpherePlane is the fraction of the move at which the sphere stops, which is
+    //  SURFACE_CLIP_EPSILON before the touch. The original game took the contact point
+    //  there too. On a move that only grazes the terrain that point can be outside
+    //  a triangle that the sphere does hit, and the hit was lost.
+    fContact = fSpherePlane;
+    if (d1 > d2) { // enter
+        fContact += fMaxFraction;
+
+        if (fContact > 1) {
+            fContact = 1;
+        }
+    }
+
+    // Fixed in MoH Arena: the contact point is measured from the start of the move.
+    //  The original game measured it from the end, which put it one whole move too far
+    //  and let small fast objects such as grenades pass through the terrain.
+    d1 = (pt->vEnd[0] - pt->vStart[0]) * fContact + pt->vStart[0] - sphere.radius * plane[0] - x0;
+    d2 = (pt->vEnd[1] - pt->vStart[1]) * fContact + pt->vStart[1] - sphere.radius * plane[1] - y0;
 
     eMode = pt->tc->squares[pt->i][pt->j].eMode;
 
