@@ -1,0 +1,339 @@
+<ui version="1">
+<!--
+  Added in MoH Arena: the "Spectator" HUD style, the layout that the match
+  camera films with.
+
+  It is for the spectator side of an objective game alone.  A player on a
+  team gets the "Arena" style in its place, from the moment he joins, and so
+  does a spectator of any other game mode (CL_UIR_ActiveHudId).
+
+    arena        the top bar, the three feeds and their sizes
+                 (ui_om_hud_topbar_scale, ui_om_hud_killfeed_size,
+                 ui_om_hud_messages_size, ui_om_hud_chat_size)
+    its own      the two player lists, the followed player's name and health
+                 and a kill feed with each name in its team's colour
+
+  The player lists are the scoreboard rows: a name on the team's colour while
+  the player lives, a skull when he is dead and a white frame on the followed
+  player.  A row shows health only on a server that sends it, as mc_on 1 and
+  mc_h<client number>.  MoH Arena's servers send it to the match camera's
+  slot alone, so every other spectator sees who is alive and no more.
+
+  Left out on purpose: the hint lines of the spectator, the vote prompt, the
+  voice menu and the name under the crosshair.
+
+  The rows repeat once for each client number because an expression cannot
+  build a variable's name.  This file was made once from the camera's
+  generator and is now kept by hand.
+-->
+<definitions hud-id="spectator" hud-label="Spectator" draw-order="4"
+             pause-menu="dm_pause" scoreboard-menu="scoreboard">
+<import src="ui/modern/lib/theme.xml"/>
+<import src="ui/modern/lib/hud_modern_tokens.xml"/>
+<import src="ui/modern/lib/shapes.xml"/>
+<import src="ui/modern/lib/hud_modern_images.xml"/>
+<import src="ui/modern/lib/hud_images.xml"/>
+<import src="ui/modern/lib/hud_messaging.xml"/>
+<import src="ui/modern/lib/hud_modern.xml"/>
+<import src="ui/modern/lib/hud_modern_grenade.xml"/>
+<import src="ui/modern/lib/hud_arena.xml"/>
+<templates>
+<template id="spectator-row-left">
+<container type="vertical" width="300px" height="33px" padding="0"
+           valign="start" fill="{var.fill-transparent}"
+           visible="{item.field.kind == &quot;player&quot; and item.field.is_spectator != 1 and item.field.team != &quot;axis&quot;}">
+<container type="overlap" width="300px" height="30px" padding="0"
+           fill="{var.fill-panel}" stroke-width="1px" crisp="true"
+           stroke="{item.field.name == cvar.ui_om_hud_following_name ? var.color-white : var.fill-divider}"
+           opacity="{item.field.is_dead == 1 ? 0.6 : 1}">
+<container width="298px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" opacity="0.35"/>
+<container width="298px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on != 1 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h0, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 0 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h1, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 1 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h2, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 2 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h3, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 3 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h4, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 4 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h5, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 5 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h6, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 6 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h7, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 7 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h8, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 8 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h9, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 9 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h10, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 10 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h11, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 11 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h12, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 12 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h13, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 13 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h14, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 14 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h15, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 15 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h16, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 16 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h17, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 17 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h18, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 18 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h19, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 19 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h20, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 20 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h21, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 21 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h22, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 22 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h23, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 23 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h24, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 24 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h25, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 25 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h26, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 26 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h27, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 27 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h28, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 28 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h29, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 29 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h30, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 30 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h31, 0, 100)}px" height="28px" halign="start" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 31 and item.field.is_dead != 1}"/>
+<container type="horizontal" width="298px" height="28px"
+           padding="0 8px 0 8px" gap="6px" valign="center" fill="{var.fill-transparent}">
+<image src="modernhud-skull-50" width="18px" height="18px" fit="contain" valign="center" visible="{item.field.is_dead == 1}"/>
+<label font="body" font-size="16px" font-weight="600" width="fill" height="auto" halign="start" valign="center" text-overflow="ellipsis" drop-shadow="true" color="{item.field.is_dead == 1 ? var.color-scoreboard-dead : var.color-white}">{item.field.name}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 0 and item.field.is_dead != 1}" bind="cvar:mc_h0">{cvar.mc_h0}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 1 and item.field.is_dead != 1}" bind="cvar:mc_h1">{cvar.mc_h1}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 2 and item.field.is_dead != 1}" bind="cvar:mc_h2">{cvar.mc_h2}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 3 and item.field.is_dead != 1}" bind="cvar:mc_h3">{cvar.mc_h3}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 4 and item.field.is_dead != 1}" bind="cvar:mc_h4">{cvar.mc_h4}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 5 and item.field.is_dead != 1}" bind="cvar:mc_h5">{cvar.mc_h5}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 6 and item.field.is_dead != 1}" bind="cvar:mc_h6">{cvar.mc_h6}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 7 and item.field.is_dead != 1}" bind="cvar:mc_h7">{cvar.mc_h7}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 8 and item.field.is_dead != 1}" bind="cvar:mc_h8">{cvar.mc_h8}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 9 and item.field.is_dead != 1}" bind="cvar:mc_h9">{cvar.mc_h9}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 10 and item.field.is_dead != 1}" bind="cvar:mc_h10">{cvar.mc_h10}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 11 and item.field.is_dead != 1}" bind="cvar:mc_h11">{cvar.mc_h11}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 12 and item.field.is_dead != 1}" bind="cvar:mc_h12">{cvar.mc_h12}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 13 and item.field.is_dead != 1}" bind="cvar:mc_h13">{cvar.mc_h13}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 14 and item.field.is_dead != 1}" bind="cvar:mc_h14">{cvar.mc_h14}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 15 and item.field.is_dead != 1}" bind="cvar:mc_h15">{cvar.mc_h15}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 16 and item.field.is_dead != 1}" bind="cvar:mc_h16">{cvar.mc_h16}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 17 and item.field.is_dead != 1}" bind="cvar:mc_h17">{cvar.mc_h17}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 18 and item.field.is_dead != 1}" bind="cvar:mc_h18">{cvar.mc_h18}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 19 and item.field.is_dead != 1}" bind="cvar:mc_h19">{cvar.mc_h19}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 20 and item.field.is_dead != 1}" bind="cvar:mc_h20">{cvar.mc_h20}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 21 and item.field.is_dead != 1}" bind="cvar:mc_h21">{cvar.mc_h21}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 22 and item.field.is_dead != 1}" bind="cvar:mc_h22">{cvar.mc_h22}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 23 and item.field.is_dead != 1}" bind="cvar:mc_h23">{cvar.mc_h23}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 24 and item.field.is_dead != 1}" bind="cvar:mc_h24">{cvar.mc_h24}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 25 and item.field.is_dead != 1}" bind="cvar:mc_h25">{cvar.mc_h25}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 26 and item.field.is_dead != 1}" bind="cvar:mc_h26">{cvar.mc_h26}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 27 and item.field.is_dead != 1}" bind="cvar:mc_h27">{cvar.mc_h27}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 28 and item.field.is_dead != 1}" bind="cvar:mc_h28">{cvar.mc_h28}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 29 and item.field.is_dead != 1}" bind="cvar:mc_h29">{cvar.mc_h29}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 30 and item.field.is_dead != 1}" bind="cvar:mc_h30">{cvar.mc_h30}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="end" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 31 and item.field.is_dead != 1}" bind="cvar:mc_h31">{cvar.mc_h31}</label>
+</container>
+</container>
+</container>
+</template>
+<template id="spectator-row-right">
+<container type="vertical" width="300px" height="33px" padding="0"
+           valign="start" fill="{var.fill-transparent}"
+           visible="{item.field.kind == &quot;player&quot; and item.field.is_spectator != 1 and item.field.team == &quot;axis&quot;}">
+<container type="overlap" width="300px" height="30px" padding="0"
+           fill="{var.fill-panel}" stroke-width="1px" crisp="true"
+           stroke="{item.field.name == cvar.ui_om_hud_following_name ? var.color-white : var.fill-divider}"
+           opacity="{item.field.is_dead == 1 ? 0.6 : 1}">
+<container width="298px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" opacity="0.35"/>
+<container width="298px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on != 1 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h0, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 0 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h1, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 1 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h2, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 2 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h3, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 3 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h4, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 4 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h5, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 5 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h6, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 6 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h7, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 7 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h8, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 8 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h9, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 9 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h10, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 10 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h11, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 11 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h12, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 12 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h13, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 13 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h14, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 14 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h15, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 15 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h16, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 16 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h17, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 17 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h18, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 18 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h19, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 19 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h20, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 20 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h21, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 21 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h22, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 22 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h23, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 23 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h24, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 24 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h25, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 25 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h26, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 26 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h27, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 27 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h28, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 28 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h29, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 29 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h30, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 30 and item.field.is_dead != 1}"/>
+<container width="{2.98 * clamp(cvar.mc_h31, 0, 100)}px" height="28px" halign="end" valign="start" fill="{item.field.team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}" visible="{cvar.mc_on == 1 and item.field.slot == 31 and item.field.is_dead != 1}"/>
+<container type="horizontal" width="298px" height="28px"
+           padding="0 8px 0 8px" gap="6px" valign="center" fill="{var.fill-transparent}">
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 0 and item.field.is_dead != 1}" bind="cvar:mc_h0">{cvar.mc_h0}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 1 and item.field.is_dead != 1}" bind="cvar:mc_h1">{cvar.mc_h1}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 2 and item.field.is_dead != 1}" bind="cvar:mc_h2">{cvar.mc_h2}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 3 and item.field.is_dead != 1}" bind="cvar:mc_h3">{cvar.mc_h3}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 4 and item.field.is_dead != 1}" bind="cvar:mc_h4">{cvar.mc_h4}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 5 and item.field.is_dead != 1}" bind="cvar:mc_h5">{cvar.mc_h5}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 6 and item.field.is_dead != 1}" bind="cvar:mc_h6">{cvar.mc_h6}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 7 and item.field.is_dead != 1}" bind="cvar:mc_h7">{cvar.mc_h7}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 8 and item.field.is_dead != 1}" bind="cvar:mc_h8">{cvar.mc_h8}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 9 and item.field.is_dead != 1}" bind="cvar:mc_h9">{cvar.mc_h9}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 10 and item.field.is_dead != 1}" bind="cvar:mc_h10">{cvar.mc_h10}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 11 and item.field.is_dead != 1}" bind="cvar:mc_h11">{cvar.mc_h11}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 12 and item.field.is_dead != 1}" bind="cvar:mc_h12">{cvar.mc_h12}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 13 and item.field.is_dead != 1}" bind="cvar:mc_h13">{cvar.mc_h13}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 14 and item.field.is_dead != 1}" bind="cvar:mc_h14">{cvar.mc_h14}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 15 and item.field.is_dead != 1}" bind="cvar:mc_h15">{cvar.mc_h15}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 16 and item.field.is_dead != 1}" bind="cvar:mc_h16">{cvar.mc_h16}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 17 and item.field.is_dead != 1}" bind="cvar:mc_h17">{cvar.mc_h17}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 18 and item.field.is_dead != 1}" bind="cvar:mc_h18">{cvar.mc_h18}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 19 and item.field.is_dead != 1}" bind="cvar:mc_h19">{cvar.mc_h19}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 20 and item.field.is_dead != 1}" bind="cvar:mc_h20">{cvar.mc_h20}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 21 and item.field.is_dead != 1}" bind="cvar:mc_h21">{cvar.mc_h21}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 22 and item.field.is_dead != 1}" bind="cvar:mc_h22">{cvar.mc_h22}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 23 and item.field.is_dead != 1}" bind="cvar:mc_h23">{cvar.mc_h23}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 24 and item.field.is_dead != 1}" bind="cvar:mc_h24">{cvar.mc_h24}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 25 and item.field.is_dead != 1}" bind="cvar:mc_h25">{cvar.mc_h25}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 26 and item.field.is_dead != 1}" bind="cvar:mc_h26">{cvar.mc_h26}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 27 and item.field.is_dead != 1}" bind="cvar:mc_h27">{cvar.mc_h27}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 28 and item.field.is_dead != 1}" bind="cvar:mc_h28">{cvar.mc_h28}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 29 and item.field.is_dead != 1}" bind="cvar:mc_h29">{cvar.mc_h29}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 30 and item.field.is_dead != 1}" bind="cvar:mc_h30">{cvar.mc_h30}</label>
+<label font="body" font-size="16px" font-weight="600" width="36px" height="auto" halign="start" valign="center" color="{var.color-white}" drop-shadow="true" visible="{cvar.mc_on == 1 and item.field.slot == 31 and item.field.is_dead != 1}" bind="cvar:mc_h31">{cvar.mc_h31}</label>
+<label font="body" font-size="16px" font-weight="600" width="fill" height="auto" halign="end" valign="center" text-overflow="ellipsis" drop-shadow="true" color="{item.field.is_dead == 1 ? var.color-scoreboard-dead : var.color-white}">{item.field.name}</label>
+<image src="modernhud-skull-50" width="18px" height="18px" fit="contain" valign="center" visible="{item.field.is_dead == 1}"/>
+</container>
+</container>
+</container>
+</template>
+<template id="spectator-kill-feed">
+<container type="vertical" width="{26.25 * cvar.ui_om_hud_killfeed_size}px" height="{8.75 * cvar.ui_om_hud_killfeed_size}px"
+           gap="3px" padding="0" fill="{var.fill-transparent}" halign="end" source="hud-kill-feed">
+<foreach mode="all" lifetime="6s" fade-duration="1.5s" halign="end">
+<container type="horizontal" width="auto" height="auto" gap="6px" valign="center" halign="end"
+           fill="{var.fill-transparent}">
+<label font="body" font-size="{cvar.ui_om_hud_killfeed_size}px" font-weight="600" width="auto" halign="end" drop-shadow="true" color="{item.field.killer_team == &quot;allies&quot; ? #5CA8FFFF : item.field.killer_team == &quot;axis&quot; ? #FF645AFF : var.color-white}" visible="{item.field.killer != ''}">{item.field.killer}</label>
+<image src="{item.field.weapon_image}" height="{cvar.ui_om_hud_killfeed_size * 1.25}px" width="auto" fit="contain"/>
+<image src="modernhud-skull-50" height="{cvar.ui_om_hud_killfeed_size * 1.125}px" width="auto" fit="contain"
+       visible="{item.field.kill_kind == &quot;suicide&quot;}"/>
+<image src="modernhud-headshot-50" height="{cvar.ui_om_hud_killfeed_size * 1.125}px" width="auto" fit="contain"
+       visible="{item.field.headshot == 1}"/>
+<label font="body" font-size="{cvar.ui_om_hud_killfeed_size}px" font-weight="600" width="auto" halign="start" drop-shadow="true" color="{item.field.victim_team == &quot;allies&quot; ? #5CA8FFFF : item.field.victim_team == &quot;axis&quot; ? #FF645AFF : var.color-white}" visible="{item.field.victim != ''}">{item.field.victim}</label>
+</container>
+</foreach>
+</container>
+</template>
+</templates>
+</definitions>
+<canvas>
+<container id="hud_root" type="overlap" width="100%" height="100%" fill="{var.fill-transparent}">
+<container id="hud_main" type="vertical" width="100%" height="100%" padding="32px" gap="12px"
+           fill="{var.fill-transparent}">
+<container id="hud_top_row" type="horizontal" width="100%" height="{160 * cvar.ui_om_hud_compass_scale}px">
+<container id="hud_top_row_left" type="horizontal" width="fill" height="auto" halign="start" valign="start"
+           visible="{cvar.ui_om_hud_show}">
+<use id="arena_compass" template="arena-compass"/>
+</container>
+<container id="hud_top_row_center" type="vertical" width="50%" height="100%" halign="center" valign="start" visible="{cvar.ui_om_hud_show}">
+
+						<container type="horizontal" width="auto" height="{32 * cvar.ui_om_hud_topbar_scale}px" gap="{4 * cvar.ui_om_hud_topbar_scale}px" halign="center" valign="center" fill="{var.fill-transparent}" visible="{cvar.cg_gametype &gt; 0}">
+							<use template="arena-roster" team="allies" side="left" />
+							<container width="auto" height="auto" fill="{var.fill-transparent}" visible="{cvar.cg_gametype &gt; 1 and cvar.ui_om_hud_allied_score != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-hud-allied-score}" bind="cvar:ui_om_hud_allied_score" />
+							</container>
+							<container width="auto" height="auto" fill="{var.fill-transparent}" visible="{cvar.cg_gametype == 1 and cvar.ui_om_hud_score_self != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-panel}" bind="cvar:ui_om_hud_score_self" />
+							</container>
+							<use template="arena-timer-box" />
+							<container width="auto" height="auto" fill="{var.fill-transparent}" visible="{cvar.cg_gametype &gt; 1 and cvar.ui_om_hud_axis_score != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-hud-axis-score}" bind="cvar:ui_om_hud_axis_score" />
+							</container>
+							<container width="auto" height="auto" fill="{var.fill-transparent}" visible="{cvar.cg_gametype == 1 and cvar.ui_om_hud_score_leader != ''}">
+								<use template="arena-score-box" box-fill="{var.fill-panel}" bind="cvar:ui_om_hud_score_leader" />
+							</container>
+							<use template="arena-roster" team="axis" side="right" />
+						</container>
+					</container>
+<container id="hud_top_row_right" type="horizontal" width="fill" height="100%" halign="end" valign="start"/>
+</container>
+<container id="hud_middle_row" type="horizontal" width="fill" height="fill" halign="start" valign="start">
+<container id="hud_middle_row_left" type="vertical" width="fill" height="100%" gap="16px"
+           halign="start" valign="start" fill="{var.fill-transparent}">
+<use template="hud-game-messages-panel" width="{22.5 * cvar.ui_om_hud_messages_size}px"
+     height="{7.5 * cvar.ui_om_hud_messages_size}px" font-size="{cvar.ui_om_hud_messages_size}px"/>
+</container>
+<container id="hud_middle_row_right" type="vertical" width="fill" height="100%"
+           halign="end" valign="start" fill="{var.fill-transparent}"/>
+</container>
+<container id="hud_bottom_row" type="horizontal" width="100%" height="auto" valign="end">
+<container id="hud_bottom_row_left" type="vertical" width="fill" height="auto" gap="12px"
+           halign="start" valign="end" fill="{var.fill-transparent}">
+<use id="arena_chat" template="hud-chat-panel" width="{22.5 * cvar.ui_om_hud_chat_size}px"
+     height="{10 * cvar.ui_om_hud_chat_size}px" font-size="{cvar.ui_om_hud_chat_size}px"/>
+<container type="vertical" width="300px" height="auto" gap="0px"
+           fill="{var.fill-transparent}">
+<container id="spectator_list_left" type="vertical" width="300px" height="auto" gap="0px"
+           source="scoreboard" fill="{var.fill-transparent}" visible="{cvar.ui_om_hud_show}">
+<foreach mode="all" type="vertical" width="300px" height="auto" gap="0px">
+<use template="spectator-row-left"/>
+</foreach>
+</container>
+<container width="300px" height="34px" fill="{var.fill-transparent}"/>
+</container>
+</container>
+<container id="hud_bottom_row_center" type="vertical" width="50%" height="auto" gap="10px"
+           halign="center" valign="end">
+<label font="body" font-size="18px" width="100%" height="auto" halign="center" valign="center"
+       text-wrap="word" color="{var.color-white}" drop-shadow="true"
+       visible="{cvar.ui_om_hud_centerprint != ''}"
+       bind="cvar:ui_om_hud_centerprint">{cvar.ui_om_hud_centerprint}</label>
+<container id="spectator_following" type="vertical" width="auto" height="auto" gap="6px"
+           halign="center" valign="end" fill="{var.fill-transparent}"
+           visible="{cvar.ui_om_hud_show and cvar.ui_om_hud_following_name != ''}">
+<label id="spectated_player_name" font="body" font-size="26px" font-weight="700"
+       width="auto" height="auto" halign="center" valign="center" drop-shadow="true"
+       color="{var.color-white}"
+       bind="cvar:ui_om_hud_following_name"/>
+<container type="horizontal" width="auto" height="auto" gap="10px" halign="center" valign="center"
+           fill="{var.fill-transparent}">
+<container type="overlap" width="304px" height="14px" padding="0" fill="{var.fill-panel}"
+           stroke="{var.fill-divider}" stroke-width="1px" crisp="true">
+<container width="{300 * clamp(cvar.ui_om_hud_health_frac, 0, 1)}px" height="10px" margin="2px"
+           halign="start" valign="start"
+           fill="{cvar.ui_om_hud_following_team == &quot;axis&quot; ? var.fill-hud-axis-score : var.fill-hud-allied-score}"/>
+</container>
+<label font="body" font-size="18px" font-weight="600" width="40px" height="auto" halign="start"
+       valign="center" color="{var.color-white}" drop-shadow="true"
+       bind="cvar:ui_om_hud_health">{cvar.ui_om_hud_health}</label>
+</container>
+</container>
+</container>
+<container id="hud_bottom_row_right" type="vertical" width="fill" height="auto"
+           halign="end" valign="end" fill="{var.fill-transparent}">
+<container type="vertical" width="300px" height="auto" gap="0px"
+           fill="{var.fill-transparent}">
+<container id="spectator_list_right" type="vertical" width="300px" height="auto" gap="0px"
+           source="scoreboard" fill="{var.fill-transparent}" visible="{cvar.ui_om_hud_show}">
+<foreach mode="all" type="vertical" width="300px" height="auto" gap="0px">
+<use template="spectator-row-right"/>
+</foreach>
+</container>
+<container width="300px" height="34px" fill="{var.fill-transparent}"/>
+</container>
+</container>
+</container>
+</container>
+<container id="hud_killfeed_parent" type="horizontal" width="100%" height="100%" padding="32px"
+           halign="end" valign="start" fill="{var.fill-transparent}">
+<use template="spectator-kill-feed"/>
+</container>
+<container id="hud_stopwatch_parent" type="vertical" width="100%" height="100%" halign="center"
+           valign="center" padding="16px">
+<container id="hud_stopwatch_container_top" type="vertical" width="100%" height="50%"
+           halign="center" valign="center"/>
+<container id="hud_stopwatch_container_bottom" type="vertical" width="100%" height="50%"
+           halign="center" valign="center">
+<container type="horizontal" width="{300 * cvar.ui_om_hud_stopwatch_frac}px" height="24px"
+           margin="0 0 0 0" halign="center" valign="center"
+           fill="{var.fill-hud-stopwatch}" visible="{cvar.ui_om_hud_stopwatch_ms > 0}"/>
+</container>
+</container>
+</container>
+</canvas>
+</ui>

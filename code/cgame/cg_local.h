@@ -649,6 +649,7 @@ extern "C" {
     int         CG_SpectateFP_FollowClient(void);
     qboolean    CG_SpectateFP_InZoom(void);
     int         CG_SpectateFP_ZoomFov(void);
+    int         CG_SpectateFP_ZoomType(void); // Added in MoH Arena
     float       CG_SpectateFP_LeanAngle(void);
     qboolean    CG_SpectateFP_CalcEye(vec3_t outOrigin, vec3_t outAngles);
 

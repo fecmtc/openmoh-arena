@@ -5511,6 +5511,26 @@ void TestBoolExpr(void)
 	CHECK(diag.find("and") != std::string::npos || diag.find("or") != std::string::npos);
 	CHECK(!UID_EvalBool("true || false", &ctx, &lim, &result, &diag));
 
+	// Added in MoH Arena: the settings rows that the "Arena" and the "Spectator" style share,
+	// with the expression on one line and on two
+	const char *const kSharedRow = "cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == spectator)";
+	const char *const kWeaponRow = "cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == modern\n"
+								"\t\t\tor cvar.ui_om_hud == spectator)";
+	st.cvars["cg_hud"] = FakeCvar{"1", 0};
+	st.cvars["ui_om_hud"] = FakeCvar{"spectator", 0};
+	CHECK(UID_EvalBool(kSharedRow, &ctx, &lim, &result, &diag) && result);
+	CHECK(UID_EvalBool(kWeaponRow, &ctx, &lim, &result, &diag) && result);
+	st.cvars["ui_om_hud"] = FakeCvar{"arena", 0};
+	CHECK(UID_EvalBool(kSharedRow, &ctx, &lim, &result, &diag) && result);
+	st.cvars["ui_om_hud"] = FakeCvar{"modern", 0};
+	CHECK(UID_EvalBool(kSharedRow, &ctx, &lim, &result, &diag) && !result);
+	CHECK(UID_EvalBool(kWeaponRow, &ctx, &lim, &result, &diag) && result);
+	st.cvars["ui_om_hud"] = FakeCvar{"classic", 0};
+	CHECK(UID_EvalBool(kWeaponRow, &ctx, &lim, &result, &diag) && !result);
+	st.cvars["ui_om_hud"] = FakeCvar{"spectator", 0};
+	st.cvars["cg_hud"] = FakeCvar{"0", 0};
+	CHECK(UID_EvalBool(kSharedRow, &ctx, &lim, &result, &diag) && !result);
+
 	CHECK(UID_EvalBool("icontains('Sensitivity', 'sens')", &ctx, &lim, &result, &diag) && result);
 	CHECK(UID_EvalBool("icontains('Sensitivity', 'GAMMA')", &ctx, &lim, &result, &diag) && !result);
 	CHECK(UID_EvalBool("icontains('Sensitivity', '')", &ctx, &lim, &result, &diag) && result);
@@ -10659,6 +10679,7 @@ static void TestHudPackMetadataPeekFixtures(void)
 		{"ui/modern/huds/competitive.xml", "competitive", "Competitive", "dm_pause_modern", "scoreboard", 4},
 		// Added in MoH Arena
 		{"ui/modern/huds/arena.xml", "arena", "Arena", "dm_pause", "scoreboard", 4},
+		{"ui/modern/huds/spectator.xml", "spectator", "Spectator", "dm_pause", "scoreboard", 4},
 	};
 
 	uid_parse_io_t parseIo = MakeTestParseIo();
@@ -10761,6 +10782,58 @@ static void TestModernHudPackLoads(void)
 	CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
 	CHECK(!diags.HasErrors());
 	UID_DestroyDocument(doc);
+}
+
+// Added in MoH Arena: the two styles of MoH Arena load, expand and compile
+// without an error. "spectator" is the one a spectator gets, "arena" the one
+// he gets in its place on a team.
+static void TestMoHArenaHudPacksLoad(void)
+{
+	static const char *const kNames[] = {"arena", "spectator"};
+
+	for (const char *name : kNames) {
+		std::string vfsPath = std::string("ui/modern/huds/") + name + ".xml";
+		std::string path = std::string(UID_TEST_FIXTURE_DIR) + "/huds/" + name + ".xml";
+		FILE       *f = std::fopen(path.c_str(), "rb");
+		CHECK(f != nullptr);
+		if (!f) {
+			continue;
+		}
+		std::fseek(f, 0, SEEK_END);
+		long sz = std::ftell(f);
+		std::fseek(f, 0, SEEK_SET);
+		std::string xml((size_t)sz, '\0');
+		CHECK(std::fread(xml.data(), 1, (size_t)sz, f) == (size_t)sz);
+		std::fclose(f);
+
+		uid_limits_t lim;
+		UID_DefaultLimits(&lim);
+		uid_document_t *doc = UID_CreateDocument();
+		uid_diag_list_t diags(lim.maxDiagnostics);
+		uid_parse_io_t  parseIo = MakeTestParseIo();
+
+		CHECK(UID_ParseXml(vfsPath.c_str(), xml.c_str(), xml.size(), &lim, &parseIo, doc, &diags) == UID_OK);
+		if (diags.HasErrors()) {
+			for (const auto &d : diags.Items()) {
+				std::fprintf(
+					stderr,
+					"%s hud: %s:%d: %s\n",
+					name,
+					d.location.path ? d.location.path : "?",
+					d.location.line,
+					d.message.c_str()
+				);
+			}
+		}
+		CHECK(!diags.HasErrors());
+		CHECK(!doc->hasMenuMeta);
+		CHECK(doc->drawOrder == 4);
+		CHECK(UID_ExpandDocument(doc, &diags) == UID_OK);
+		CHECK(!diags.HasErrors());
+		CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
+		CHECK(!diags.HasErrors());
+		UID_DestroyDocument(doc);
+	}
 }
 
 static void TestHudAndMenuIdMutuallyExclusive(void)
@@ -12108,6 +12181,7 @@ int main(void)
 	TestTranslateOffsetLayout();
 	TestClassicHudPackLoads();
 	TestModernHudPackLoads();
+	TestMoHArenaHudPacksLoad(); // Added in MoH Arena
 	TestClassicHudLayoutGeometry();
 	TestMessageCollectionPaint();
 	TestForeachLifetimeFade();

@@ -28,6 +28,14 @@ extern "C" {
 
 #define CL_HUD_LEGACY_ID "legacy"
 
+/*
+ * Added in MoH Arena: the style for the spectator side of an objective game
+ * alone, and the style that a player on a team or a spectator of any other
+ * game mode gets in its place (CL_UIR_ActiveHudId).
+ */
+#define CL_HUD_SPECTATOR_ID "spectator"
+#define CL_HUD_PLAYING_ID   "arena"
+
 void     CL_UIMenu_ReloadHudRegistry(void);
 void     CL_UIMenu_ListHuds_f(void);
 int      CL_UIMenu_HudCount(void);

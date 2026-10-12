@@ -286,6 +286,8 @@ static const moharenaUIOwnFile_t moharenaUIHudFiles[] = {
     {"modern",      "ui/modern/huds/modern.xml"     },
     {"competitive", "ui/modern/huds/competitive.xml"},
     {"arena",       "ui/modern/huds/arena.xml"      },
+    // For the spectator side alone, see CL_UIR_ActiveHudId
+    {"spectator",   "ui/modern/huds/spectator.xml"  },
 };
 
 /*

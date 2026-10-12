@@ -620,11 +620,9 @@ void CG_DrawZoomOverlay()
         } else if (!cg.snap->ps.stats[STAT_INZOOM] && CG_SpectateFP_InZoom() && CG_SpectateFP_ZoomFov() <= 30) {
             // Added in MoH Arena: the zoom of the player followed in first-person spectate, in both UIs
             //  for the server's first-person switch (CG_SpectateFP_Wanted)
-            if (!Q_stricmp(weaponstring, "KAR98 - Sniper")) {
-                zoomType = 1;
-            } else {
-                zoomType = 0;
-            }
+            // Changed in MoH Arena: the scope of what that player holds. The weapon name above is the
+            //  spectator's own, who holds none, so every followed player got the Allied scope.
+            zoomType = CG_SpectateFP_ZoomType();
         } else {
             bDrawOverlay = qfalse;
         }

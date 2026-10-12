@@ -89,6 +89,11 @@ lists what players see. In short:
 * An [optional modern UI](#optional-modern-ui), off by default.
 * A first-person spectator view that a server can switch on for everyone who
   follows a player (the serverinfo key `moharena_firstperson`).
+* A first-person spectator who follows a player sees the scope of the rifle
+  that player holds. It was the Allied scope for every rifle before.
+* The modern UI has a fifth HUD style, "Spectator", for the spectator side
+  of an objective game: the layout of MoH Arena's match camera, with a list
+  of each team's players and a kill feed in the teams' colours.
 * A weapon command waits until the server has taken the one before, so a fast
   turn of the mouse wheel no longer drops the weapon on servers of the
   original game.

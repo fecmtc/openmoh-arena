@@ -80,6 +80,12 @@ uint64_t UIR_Scoreboard_GetRevision(void);
 void UIR_Scoreboard_MarkDeadByName(const char *name);
 void UIR_Scoreboard_MarkAllAlive(void);
 
+/*
+ * Added in MoH Arena: a player's team from the scoreboard rows: 1 for allies,
+ * 2 for axis, 0 when the rows do not tell.
+ */
+int UIR_Scoreboard_TeamByName(const char *name);
+
 void UIR_Scoreboard_FormatKd(int kills, int deaths, char *out, size_t outSize);
 void UIR_Scoreboard_Vec4ToHex(const float *rgba, char *out, size_t outSize);
 void UIR_Scoreboard_ApplySortColumn(const char *column);

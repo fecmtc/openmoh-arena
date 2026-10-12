@@ -165,6 +165,38 @@ such as a match camera, can set `ui_om_hud_score_poll 1` to get the list
 every two seconds again. On a server that says `sv_floodProtect 0` the
 timer stays as it was.
 
+A fifth style, "Spectator", is for the spectator side alone. It is the layout
+that MoH Arena's match camera films with:
+
+- from "Arena": the top bar, the kill feed, the game messages and the chat,
+  with their sizes;
+- a list of each team's players at the left and the right edge of the screen;
+- the followed player's name and health at the bottom.
+
+A row of a list has the player's name on the team's colour, a skull when the
+player is dead and a white frame on the followed player. The kill feed shows
+each name in its team's colour, blue for the Allies and red for the Axis. The
+style has no hint lines for the spectator, no vote prompt, no voice message
+menu and no name under the crosshair.
+
+A player who picks "Spectator" and joins a team gets "Arena" in its place, and
+"Spectator" again when he goes back to the spectators. The team decides: a
+dead player who follows a teammate keeps "Arena". The style is for objective
+mode (`g_gametype 4`): a spectator of any other game mode gets "Arena" too,
+except a client whose server sends `mc_on 1`, as MoH Arena's servers do for
+the match camera. The setting stays `ui_om_hud spectator` all the time, and
+the size rows of "Arena" are on the settings page for it too.
+
+A row shows a player's health only when the server sends it to the client, as
+`mc_on 1` and one `mc_h<client number>` for each player. MoH Arena's servers
+send these to the match camera alone, so any other spectator sees who is
+alive and no more.
+
+The kill feed reads a player's team from the game's player list. Some servers
+do not put the team there, an Allied Assault server of the original game for
+one, and the feed then takes it from the last score list. Where a style draws
+the weapon picture of the killer's side, it follows the same team.
+
 A name or a chat line from the game is Windows-1252, one byte for each
 character, and the modern UI's own text is UTF-8. The UI's fonts draw both
 and hold the glyphs of the bytes 128 to 255. The font atlas has one size,

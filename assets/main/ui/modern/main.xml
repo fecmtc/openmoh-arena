@@ -251,20 +251,25 @@
 								<use template="settings-section-header" label="HUD"/>
 								<use template="settings-cyclic-row" label="HUD style" bind="cvar:ui_om_hud" source="hud-packs" commit="change"
 								     visible="{cvar.cg_hud != 0 and !cvar.ui_legacy}"/>
-								<!-- Added in MoH Arena: the sizes of the parts of the "Arena" HUD style, shown while it is the chosen style. -->
+								<!--
+								  Added in MoH Arena: the sizes of the parts of the "Arena" HUD style, shown while it
+								  is the chosen style. "Spectator" has the same parts and gives way to "Arena" for a
+								  player on a team, so the rows are shown for it too.
+								-->
 								<use template="settings-slider-row" label="Compass size" bind="cvar:ui_om_hud_compass_scale" min="0.5" max="2" step="0.05" commit="change"
-								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
+								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == spectator)}"/>
 								<use template="settings-slider-row" label="Top bar size" bind="cvar:ui_om_hud_topbar_scale" min="0.5" max="2" step="0.05" commit="change"
-								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
+								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == spectator)}"/>
 								<!-- Added in MoH Arena: the "Modern" style has the same weapon panel, so this row is shown for both. -->
 								<use template="settings-slider-row" label="Weapon panel size" bind="cvar:ui_om_hud_weapon_scale" min="0.5" max="2" step="0.05" commit="change"
-								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == modern)}"/>
+								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == modern
+								              or cvar.ui_om_hud == spectator)}"/>
 								<use template="settings-slider-row" label="Kill feed text size" bind="cvar:ui_om_hud_killfeed_size" min="10" max="32" step="1" commit="change"
-								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
+								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == spectator)}"/>
 								<use template="settings-slider-row" label="Messages text size" bind="cvar:ui_om_hud_messages_size" min="10" max="32" step="1" commit="change"
-								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
+								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == spectator)}"/>
 								<use template="settings-slider-row" label="Chat text size" bind="cvar:ui_om_hud_chat_size" min="10" max="32" step="1" commit="change"
-								     visible="{cvar.cg_hud != 0 and cvar.ui_om_hud == arena}"/>
+								     visible="{cvar.cg_hud != 0 and (cvar.ui_om_hud == arena or cvar.ui_om_hud == spectator)}"/>
 								<use template="settings-cyclic-row" label="Draw weapon" bind="cvar:cg_drawviewmodel" source="draw-viewmodel" commit="change"/>
 								<use template="settings-cyclic-row" label="Weapons Bar" bind="cvar:ui_weaponsbar" source="weapons-bar" commit="change"
 								     visible="{cvar.cg_hud != 0}"/>

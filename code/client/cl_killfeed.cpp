@@ -32,6 +32,22 @@ extern "C" char *Cmd_Argv(int arg);
 
 static uint64_t s_killFeedNextId = 1;
 
+/*
+ * Added in MoH Arena: the team from the scoreboard rows, for a server whose
+ * player strings carry no team (retail Allied Assault).
+ */
+static int CL_KillFeed_TeamFromScoreboard(const char *name)
+{
+	switch (UIR_Scoreboard_TeamByName(name)) {
+	case 1:
+		return TEAM_ALLIES;
+	case 2:
+		return TEAM_AXIS;
+	default:
+		return TEAM_NONE;
+	}
+}
+
 /* Added in Omaha: match sanitized death-message names to CS_PLAYERS team. */
 static int CL_KillFeed_TeamForPlayerName(const char *name)
 {
@@ -76,9 +92,10 @@ static int CL_KillFeed_TeamForPlayerName(const char *name)
 				return atoi(teamStr);
 			}
 		}
-		return TEAM_NONE;
+		break;
 	}
-	return TEAM_NONE;
+	// Added in MoH Arena: no team came with the name, so the last score list is asked
+	return CL_KillFeed_TeamFromScoreboard(name);
 }
 
 /* Added in Omaha: "allies" / "axis" / "" for HUD fields (icon_team never empty). */

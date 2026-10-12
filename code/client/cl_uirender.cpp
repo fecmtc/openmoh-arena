@@ -6220,6 +6220,39 @@ qboolean CL_UIR_UseLegacyMain(void)
 	return g_useLegacyMain;
 }
 
+/*
+ * Added in MoH Arena: true while the player is on a team, alive or dead.
+ * False on the spectator side and before the first snapshot of a game.
+ */
+static qboolean CL_UIR_PlayerOnTeam(void)
+{
+	int team;
+
+	if (clc.state != CA_ACTIVE || !cl.snap.valid) {
+		return qfalse;
+	}
+	team = cl.snap.ps.stats[STAT_TEAM];
+	return (team == TEAM_FREEFORALL || team == TEAM_ALLIES || team == TEAM_AXIS) ? qtrue : qfalse;
+}
+
+/*
+ * Added in MoH Arena: true in a game that the "spectator" style is made
+ * for. That is objective mode, which cgame reads from the server's info
+ * (cg_gametype): a round has no respawn, so the lists can tell who is
+ * alive from the kill lines. The match camera's slot, which the server
+ * marks with mc_on 1, has the style in every mode.
+ */
+static qboolean CL_UIR_SpectatorStyleGame(void)
+{
+	if (clc.state != CA_ACTIVE) {
+		return qtrue;
+	}
+	if (cg_gametype && cg_gametype->integer == GT_OBJECTIVE) {
+		return qtrue;
+	}
+	return Cvar_VariableIntegerValue("mc_on") == 1 ? qtrue : qfalse;
+}
+
 const char *CL_UIR_ActiveHudId(void)
 {
 	if (!g_legacyCached) {
@@ -6230,6 +6263,17 @@ const char *CL_UIR_ActiveHudId(void)
 	}
 	if (!ui_om_hud || !ui_om_hud->string[0]) {
 		return "classic";
+	}
+	/*
+	 * Added in MoH Arena: the "spectator" style is for the spectator side
+	 * of an objective game alone. A player who joins a team gets the "arena"
+	 * style until he goes back to the spectators, and so does a spectator
+	 * of any other game mode. CL_UIMenu_SyncAutoMenus asks every frame, so
+	 * the HUD changes with the team and the chosen style stays as it is.
+	 */
+	if (!Q_stricmp(ui_om_hud->string, CL_HUD_SPECTATOR_ID)
+	    && (CL_UIR_PlayerOnTeam() || !CL_UIR_SpectatorStyleGame())) {
+		return CL_HUD_PLAYING_ID;
 	}
 	return ui_om_hud->string;
 }

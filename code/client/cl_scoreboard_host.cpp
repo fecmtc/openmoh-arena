@@ -542,6 +542,45 @@ void UIR_Scoreboard_MarkDeadByName(const char *name)
 }
 
 /*
+ * Added in MoH Arena: a player's team from the scoreboard rows: 1 for allies,
+ * 2 for axis, 0 when the rows do not tell. A retail Allied Assault server sends
+ * no team with a player's name, so there the kill feed asks these rows.
+ */
+int UIR_Scoreboard_TeamByName(const char *name)
+{
+	char want[64];
+	int  i;
+
+	if (!name || !name[0]) {
+		return 0;
+	}
+	UIR_Scoreboard_CleanName(name, want, sizeof(want));
+	if (!want[0]) {
+		return 0;
+	}
+	for (i = 0; i < g_scoreboardCount; i++) {
+		const uir_scoreboard_row_t *row = &g_scoreboardRows[i];
+		char                        have[64];
+
+		if (row->kind != UIR_SCORE_ROW_PLAYER || row->isHeader || row->isSpectator) {
+			continue;
+		}
+		UIR_Scoreboard_CleanName(row->name, have, sizeof(have));
+		if (!have[0] || Q_stricmp(have, want) != 0) {
+			continue;
+		}
+		if (!Q_stricmp(row->team, "allies")) {
+			return 1;
+		}
+		if (!Q_stricmp(row->team, "axis")) {
+			return 2;
+		}
+		return 0;
+	}
+	return 0;
+}
+
+/*
  * Added in MoH Arena: a new round starts with everyone alive. The client calls
  * this when the server restarted, which is how a game played in rounds starts
  * each round. The score reply that the HUD asks for at that moment replaces the

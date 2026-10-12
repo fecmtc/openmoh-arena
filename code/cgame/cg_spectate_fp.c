@@ -98,6 +98,51 @@ int CG_SpectateFP_ZoomFov(void)
 	return cg.spectateFp.active ? cg.spectateFp.zoomFov : 0;
 }
 
+/*
+===============
+CG_SpectateFP_ZoomType
+
+Added in MoH Arena: which scope CG_DrawZoomOverlay draws for the player followed. That function reads
+the weapon of the spectator's own player state, which holds none, so every followed player got the
+Allied scope. A spectator is sent no other player's weapon name; what that player holds is the entity
+attached to them, and its model tells the scoped KAR98 (1) and the binoculars (3) from every other
+rifle (0). Without such an entity the followed player's team decides: 1 for the Axis.
+===============
+*/
+int CG_SpectateFP_ZoomType(void)
+{
+	const entityState_t *es;
+	const char          *model;
+	int                  i;
+
+	if (!cg.spectateFp.active || !cg.snap) {
+		return 0;
+	}
+
+	for (i = 0; i < cg.snap->numEntities; i++) {
+		es = &cg.snap->entities[i];
+		if (es->parent != cg.spectateFp.clientNum || es->modelindex <= 0 || es->modelindex >= MAX_MODELS) {
+			continue;
+		}
+		if (es->renderfx & RF_DONTDRAW) {
+			continue;
+		}
+
+		model = CG_ConfigString(CS_MODELS + es->modelindex);
+		if (Q_stristr(model, "kar98sniper")) {
+			return 1;
+		}
+		if (Q_stristr(model, "binocular")) {
+			return 3;
+		}
+		if (Q_stristr(model, "models/weapons/")) {
+			return 0;
+		}
+	}
+
+	return (cg_entities[cg.spectateFp.clientNum].currentState.eFlags & EF_AXIS) ? 1 : 0;
+}
+
 float CG_SpectateFP_LeanAngle(void)
 {
 	return cg.spectateFp.active ? cg.spectateFp.leanAngle : 0.0f;

@@ -455,6 +455,12 @@ own differences.
   the answers a kill message marks its victim as dead in the Arena style's
   top bar. On a server that says `sv_floodProtect 0` the timer stays, and
   `ui_om_hud_score_poll 1` brings it back for a client that only watches.
+- The modern UI has a HUD style for the spectator side, "Spectator": the
+  layout of MoH Arena's match camera, with a list of each team's players and
+  a kill feed that shows each name in its team's colour. It is for objective
+  mode: a player who joins a team gets the "Arena" style in its place, and
+  so does a spectator of any other game mode. A kill line also finds a
+  player's team on a server that does not send it with the player's name.
 - The modern UI draws the characters above ASCII. A name or a chat line
   from the game is Windows-1252, and the UI's two fonts now hold the glyphs
   of the bytes 128 to 255. Text typed into the modern UI, such as the name
