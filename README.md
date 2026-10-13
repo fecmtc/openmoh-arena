@@ -94,9 +94,6 @@ lists what players see. In short:
 * The modern UI has a fifth HUD style, "Spectator", for the spectator side
   of an objective game: the layout of MoH Arena's match camera, with a list
   of each team's players and a kill feed in the teams' colours.
-* A weapon command waits until the server has taken the one before, so a fast
-  turn of the mouse wheel no longer drops the weapon on servers of the
-  original game.
 * On Allied Assault servers a crouched player is predicted with the right
   height, so the view no longer shakes under a low ceiling.
 * The modern HUD asks a server with flood protection for the scores after an

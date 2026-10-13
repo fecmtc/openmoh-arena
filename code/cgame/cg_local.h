@@ -236,12 +236,6 @@ extern "C" {
         // input state sent to server
         int iWeaponCommand;
         int iWeaponCommandSend;
-        // Added in MoH Arena: the last weapon command that went out. A different
-        // one waits until the server has taken it (CG_WeaponCommandButtonBits).
-        int iWeaponCommandSent;     // 0: none yet
-        int iWeaponCommandSentLeft; // usercmds that command is still owed
-        int iWeaponCommandSentTime; // real time of its last usercmd
-        int iWeaponCommandGap;      // usercmds without a weapon command since then
 
         // auto rotating items
         vec3_t autoAngles;
