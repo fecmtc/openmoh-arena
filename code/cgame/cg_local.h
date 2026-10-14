@@ -630,6 +630,16 @@ extern "C" {
     int  CG_GetVMAnimPrefixIndex();
     void CG_ViewModelAnimation(refEntity_t *pModel);
     void CG_CalcViewModelMovement(float fViewBobPhase, float fViewBobAmp, vec_t *vVelocity, vec_t *vMovement);
+    // Added in MoH Arena: the same for a player who is not this client's own (a first-person spectator)
+    void CG_CalcViewModelMovementFor(
+        float    fViewBobPhase,
+        float    fViewBobAmp,
+        vec_t   *vVelocity,
+        vec_t   *vMovement,
+        qboolean bWalking,
+        qboolean bCrouching,
+        float    fLeanAngle
+    );
 
     //
     // cg_spectate_fp.c
@@ -646,6 +656,16 @@ extern "C" {
     int         CG_SpectateFP_ZoomType(void); // Added in MoH Arena
     float       CG_SpectateFP_LeanAngle(void);
     qboolean    CG_SpectateFP_CalcEye(vec3_t outOrigin, vec3_t outAngles);
+    // Added in MoH Arena: the followed player's weapon and hands
+    qboolean    CG_SpectateFP_DrawArms(void);
+    qboolean    CG_SpectateFP_ArmsReady(void);
+    int         CG_SpectateFP_ArmsWeaponClass(void);
+    const char *CG_SpectateFP_ArmsWeaponName(void);
+    int         CG_SpectateFP_ArmsAnim(void);
+    int         CG_SpectateFP_ArmsAnimCount(void);
+    qboolean    CG_SpectateFP_ArmsChanged(int clientNum, qboolean arms);
+    void        CG_SpectateFP_ArmsPose(centity_t *cent);
+    void        CG_SpectateFP_ArmsModel(centity_t *cent, refEntity_t *model);
 
     //
     // cg_drawtools.c

@@ -88,7 +88,9 @@ lists what players see. In short:
   In any other case the game runs like OpenMoHAA.
 * An [optional modern UI](#optional-modern-ui), off by default.
 * A first-person spectator view that a server can switch on for everyone who
-  follows a player (the serverinfo key `moharena_firstperson`).
+  follows a player (the serverinfo key `moharena_firstperson`). It shows the
+  followed player's weapon and hands, and the eye leans, pivots and bobs as
+  in that player's own view.
 * A first-person spectator who follows a player sees the scope of the rifle
   that player holds. It was the Allied scope for every rifle before.
 * The modern UI has a fifth HUD style, "Spectator", for the spectator side

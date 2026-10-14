@@ -134,13 +134,52 @@ enum animPrefix_e {
     WPREFIX_PIAT
 };
 
+// Added in MoH Arena: the weapon and the action of the hands. The own view has them in its player state; a
+//  first-person spectator has the followed player's, worked out in cg_spectate_fp.c.
+static int CG_VMWeaponClass(void)
+{
+    if (CG_SpectateFP_DrawArms()) {
+        return CG_SpectateFP_ArmsWeaponClass();
+    }
+
+    return cg.snap->ps.stats[STAT_EQUIPPED_WEAPON];
+}
+
+static const char *CG_VMWeaponName(void)
+{
+    if (CG_SpectateFP_DrawArms()) {
+        return CG_SpectateFP_ArmsWeaponName();
+    }
+
+    return CG_ConfigString(CS_WEAPONS + cg.snap->ps.activeItems[1]);
+}
+
+static int CG_VMAnim(void)
+{
+    if (CG_SpectateFP_DrawArms()) {
+        return CG_SpectateFP_ArmsAnim();
+    }
+
+    return cg.snap->ps.iViewModelAnim;
+}
+
+static int CG_VMAnimChanged(void)
+{
+    if (CG_SpectateFP_DrawArms()) {
+        return CG_SpectateFP_ArmsAnimCount();
+    }
+
+    return cg.snap->ps.iViewModelAnimChanged;
+}
+
 int CG_GetVMAnimPrefixIndex()
 {
     const char *szWeaponName;
     int         iWeaponClass;
 
-    iWeaponClass = cg.snap->ps.stats[STAT_EQUIPPED_WEAPON];
-    szWeaponName = CG_ConfigString(CS_WEAPONS + cg.snap->ps.activeItems[1]);
+    // Changed in MoH Arena: through CG_VMWeaponClass and CG_VMWeaponName
+    iWeaponClass = CG_VMWeaponClass();
+    szWeaponName = CG_VMWeaponName();
 
     if (iWeaponClass & WEAPON_CLASS_ANY_ITEM) {
         if (!Q_stricmp(szWeaponName, "Papers")) {
@@ -345,13 +384,14 @@ void CG_ViewModelAnimation(refEntity_t *pModel)
     bWeaponChanged  = qfalse; // Added in OPM
     pTiki           = pModel->tiki;
 
-    if (cgi.anim->g_iLastEquippedWeaponStat == cg.snap->ps.stats[STAT_EQUIPPED_WEAPON]
-        && !strcmp(cgi.anim->g_szLastActiveItem, CG_ConfigString(CS_WEAPONS + cg.snap->ps.activeItems[1]))) {
+    // Changed in MoH Arena: the weapon and the action through CG_VMWeaponClass and the three beside it
+    if (cgi.anim->g_iLastEquippedWeaponStat == CG_VMWeaponClass()
+        && !strcmp(cgi.anim->g_szLastActiveItem, CG_VMWeaponName())) {
         iAnimPrefixIndex = cgi.anim->g_iLastAnimPrefixIndex;
     } else {
         iAnimPrefixIndex                    = CG_GetVMAnimPrefixIndex();
-        cgi.anim->g_iLastEquippedWeaponStat = cg.snap->ps.stats[STAT_EQUIPPED_WEAPON];
-        Q_strncpyz(cgi.anim->g_szLastActiveItem, CG_ConfigString(CS_WEAPONS + cg.snap->ps.activeItems[1]), sizeof(cgi.anim->g_szLastActiveItem));
+        cgi.anim->g_iLastEquippedWeaponStat = CG_VMWeaponClass();
+        Q_strncpyz(cgi.anim->g_szLastActiveItem, CG_VMWeaponName(), sizeof(cgi.anim->g_szLastActiveItem));
         cgi.anim->g_iLastAnimPrefixIndex = iAnimPrefixIndex;
 
         bAnimChanged   = qtrue;
@@ -372,10 +412,10 @@ void CG_ViewModelAnimation(refEntity_t *pModel)
         cgi.anim->g_iLastVMAnim                                        = 0;
     }
 
-    if (cg.snap->ps.iViewModelAnimChanged != cgi.anim->g_iLastVMAnimChanged) {
+    if (CG_VMAnimChanged() != cgi.anim->g_iLastVMAnimChanged) {
         bAnimChanged                   = qtrue;
-        cgi.anim->g_iLastVMAnim        = cg.snap->ps.iViewModelAnim;
-        cgi.anim->g_iLastVMAnimChanged = cg.snap->ps.iViewModelAnimChanged;
+        cgi.anim->g_iLastVMAnim        = CG_VMAnim();
+        cgi.anim->g_iLastVMAnimChanged = CG_VMAnimChanged();
     }
 
     if (bAnimChanged) {
@@ -552,6 +592,29 @@ void CG_ViewModelAnimation(refEntity_t *pModel)
 
 void CG_CalcViewModelMovement(float fViewBobPhase, float fViewBobAmp, vec_t *vVelocity, vec_t *vMovement)
 {
+    // Changed in MoH Arena: the work is in CG_CalcViewModelMovementFor, which takes the player's state as
+    //  arguments, so that a first-person spectator can ask for the followed player's
+    CG_CalcViewModelMovementFor(
+        fViewBobPhase,
+        fViewBobAmp,
+        vVelocity,
+        vMovement,
+        cg.predicted_player_state.walking ? qtrue : qfalse,
+        cg.predicted_player_state.viewheight == CROUCH_EYE_HEIGHT ? qtrue : qfalse,
+        cg.predicted_player_state.fLeanAngle
+    );
+}
+
+void CG_CalcViewModelMovementFor(
+    float    fViewBobPhase,
+    float    fViewBobAmp,
+    vec_t   *vVelocity,
+    vec_t   *vMovement,
+    qboolean bWalking,
+    qboolean bCrouching,
+    float    fLeanAngle
+)
+{
     int    i;
     float  fPhase, fDelta;
     vec3_t vTargOfs;
@@ -564,8 +627,8 @@ void CG_CalcViewModelMovement(float fViewBobPhase, float fViewBobAmp, vec_t *vVe
     fPhase       = sin(fViewBobPhase - 0.94 + fViewBobPhase - 0.94 + M_PI);
     vMovement[2] = (sin((fViewBobPhase - 0.94) * 4.0 + M_PI / 2) * 0.125 + fPhase) * fViewBobAmp * vm_sway_up->value;
 
-    if (cg.predicted_player_state.walking) {
-        if (cg.predicted_player_state.viewheight == CROUCH_EYE_HEIGHT) {
+    if (bWalking) {
+        if (bCrouching) {
             if (cgi.anim->g_iLastAnimPrefixIndex == WPREFIX_BAZOOKA
                 || cgi.anim->g_iLastAnimPrefixIndex == WPREFIX_PANZERSCHRECK) {
                 vTargOfs[0] = vm_offset_rocketcrouch_front->value;
@@ -589,7 +652,7 @@ void CG_CalcViewModelMovement(float fViewBobPhase, float fViewBobAmp, vec_t *vVe
         vTargOfs[2] = vm_offset_air_up->value;
     }
 
-    if (cg.predicted_player_state.walking) {
+    if (bWalking) {
         fDelta = VectorLength(vVelocity) - vm_offset_vel_base->value;
         if (fDelta > 0.0) {
             if (fDelta > 250.0 - vm_offset_vel_base->value) {
@@ -621,8 +684,8 @@ void CG_CalcViewModelMovement(float fViewBobPhase, float fViewBobAmp, vec_t *vVe
     }
 
     VectorAdd(vMovement, cgi.anim->g_vCurrentVMPosOffset, vMovement);
-    if (cg.predicted_player_state.fLeanAngle) {
-        vMovement[2] -= fabs(cg.predicted_player_state.fLeanAngle) * vm_lean_lower->value;
+    if (fLeanAngle) {
+        vMovement[2] -= fabs(fLeanAngle) * vm_lean_lower->value;
     }
 
     if (VectorNormalize2(vMovement, vNorm) > vm_offset_max->value) {

@@ -999,6 +999,9 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
     int            iAnimFlags;
     qboolean       bThirdPerson = qfalse;
     qboolean       spectateFpHide = qfalse;
+    // Added in MoH Arena: the followed player as the hands of their first-person view, and what they hold
+    qboolean       spectateFpArms = qfalse;
+    qboolean       spectateFpHeld = qfalse;
 
     s1 = &cent->currentState;
 
@@ -1015,8 +1018,15 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
     // Added in MoH Arena: in both UIs, for the server's first-person switch (CG_SpectateFP_Wanted)
     if (CG_SpectateFP_Active()) {
         const int followClient = CG_SpectateFP_FollowClient();
-        if (s1->number == followClient || s1->parent == followClient
-            || s1->number == cg.snap->ps.clientNum || s1->parent == cg.snap->ps.clientNum) {
+        // Changed in MoH Arena: with a weapon in the hand the followed player is drawn as the hands of their
+        //  own view, and what they hold goes onto those hands (CG_SpectateFP_ArmsModel)
+        if (s1->number == followClient && s1->number != cg.snap->ps.clientNum && CG_SpectateFP_DrawArms()) {
+            spectateFpArms = qtrue;
+        } else if (s1->parent == followClient && s1->parent != cg.snap->ps.clientNum
+                   && CG_SpectateFP_ArmsReady()) {
+            spectateFpHeld = qtrue;
+        } else if (s1->number == followClient || s1->parent == followClient
+                   || s1->number == cg.snap->ps.clientNum || s1->parent == cg.snap->ps.clientNum) {
             spectateFpHide = qtrue;
         }
     }
@@ -1084,7 +1094,12 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
     VectorSubtract(vMins, vMaxs, vTmp);
     model.radius = VectorLength(vTmp) * 0.5;
 
-    if (s1->number == cg.snap->ps.clientNum) {
+    if (spectateFpArms) {
+        // Added in MoH Arena: the angles of a first-person model, from the eye of the spectator's view
+        CG_SpectateFP_ArmsPose(cent);
+        model.bone_quat = cent->bone_quat;
+        model.bone_tag  = s1->bone_tag;
+    } else if (s1->number == cg.snap->ps.clientNum) {
         if (!bThirdPerson) {
             PmoveAdjustAngleSettings_Client(
                 cg.refdefViewAngles, cent->lerpAngles, &cg.predicted_player_state, &cent->currentState
@@ -1149,7 +1164,8 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
     model.tiki      = cgi.R_Model_GetHandle(cgs.model_draw[s1->modelindex]);
 
     if (s1->number != cg.snap->ps.clientNum && (s1->eType == ET_PLAYER || (s1->eFlags & EF_DEAD))) {
-        if (cg_forceModel->integer && cg_forceModelAllowed) {
+        // Changed in MoH Arena: not for the hands of a followed player, which go with the player's own skin
+        if (!spectateFpArms && cg_forceModel->integer && cg_forceModelAllowed) {
             //CG_UpdateForceModels();
 
             if (s1->eFlags & EF_AXIS) {
@@ -1211,7 +1227,8 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
             return;
         }
 
-        if (s1->parent != cg.snap->ps.clientNum || bThirdPerson) {
+        // Changed in MoH Arena: what a followed player holds goes onto the hands of their first-person view
+        if (!spectateFpHeld && (s1->parent != cg.snap->ps.clientNum || bThirdPerson)) {
             // attach the model to the world model
 
             // Fixed in OPM
@@ -1385,6 +1402,21 @@ void CG_ModelAnim(centity_t *cent, qboolean bDoShaderTime)
 
     if (cent->currentState.eType == ET_PLAYER && !(cent->currentState.eFlags & EF_DEAD)) {
         CG_PlayerTeamIcon(&model, &cent->currentState);
+    }
+
+    // Added in MoH Arena: a followed player turns into the hands of their first-person view here, after the
+    //  steps and the shadow of the body. The animations the entity ran before belong to its other model, so
+    //  they are forgotten on every change, as for the own view below.
+    if (s1->eType == ET_PLAYER && s1->number != cg.snap->ps.clientNum
+        && CG_SpectateFP_ArmsChanged(s1->number, spectateFpArms)) {
+        for (i = 0; i < MAX_FRAMEINFOS; i++) {
+            cent->animLast[i] = -1;
+        }
+        cent->animLastWeight = 0;
+        cent->usageIndexLast = 0;
+    }
+    if (spectateFpArms) {
+        CG_SpectateFP_ArmsModel(cent, &model);
     }
 
     if (s1->number == cg.snap->ps.clientNum) {

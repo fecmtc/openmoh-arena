@@ -437,11 +437,10 @@ own differences.
   value leaves the choice to the modern UI's own setting. With it come two
   fixes from Project: Omaha: the lean no longer moves the eye through a
   wall, and the near plane is pulled in at wide fields of view, so a wall
-  close to the eye is no longer cut open.
-- A weapon command that differs from the one before waits until the server
-  has taken that one. A server of the original game joins the commands of
-  one of its frames, so a fast turn of the mouse wheel (previous, then next)
-  could reach it as "drop weapon".
+  close to the eye is no longer cut open. From v0.3.3 on the eye moves as
+  in a player's own view (the lean's turn and roll, the pitch's pivot, the
+  eased height, the bob of the steps), and the followed player's weapon
+  and hands are drawn.
 - On Allied Assault servers a crouched player is predicted with the right
   height (54 units, where it was 60). Under a low ceiling, as in the tunnel
   of The V2, the view no longer shakes. A server built from this code sends
