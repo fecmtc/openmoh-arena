@@ -69,10 +69,14 @@ jobs:
         echo "CMAKE_GENERATOR=Ninja Multi-Config" >> $GITHUB_ENV
         echo "CC=clang" >> $GITHUB_ENV
         echo "CXX=clang++" >> $GITHUB_ENV
+        # Changed in MoH Arena: the tests need no client. With the Vulkan
+        # renderer off, the Reloaded client has no renderer and CMake stops,
+        # so the tests build without the client, like the Linux server build.
         echo "CMAKE_PARAM=--log-level=VERBOSE \
         -DCMAKE_INSTALL_PREFIX='${{github.workspace}}/install' \
-        -DSDL3_DIR='${{github.workspace}}/thirdparties/SDL3/install/lib/cmake/SDL3'" \
-        -DBUILD_RENDERER_VULKAN=OFF >> $GITHUB_ENV
+        -DSDL3_DIR='${{github.workspace}}/thirdparties/SDL3/install/lib/cmake/SDL3' \
+        -DBUILD_CLIENT=OFF \
+        -DBUILD_RENDERER_VULKAN=OFF" >> $GITHUB_ENV
 
     - name: Configure CMake
       working-directory: ${{github.workspace}}
