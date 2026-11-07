@@ -103,7 +103,9 @@ qboolean CL_GetUserCmd( int cmdNumber, usercmd_t *ucmd ) {
 		return qfalse;
 	}
 
-	*ucmd = cl.cmds[ cmdNumber & CMD_MASK ];
+	// Changed in Omaha: newest cmd as resampled per render frame (CL_SendCmd)
+	// Changed in MoH Arena: only with cl_cmdfps on
+	*ucmd = cl_cmdfps->integer && cmdNumber == cl.cmdNumber ? cl.predictCmd : cl.cmds[ cmdNumber & CMD_MASK ];
 
 	return qtrue;
 }
@@ -1070,6 +1072,14 @@ void CL_CGameRendering( stereoFrame_t stereo ) {
 	if( cl.oldServerTime < cl.serverStartTime ) {
 		cl.serverTime = cl.serverStartTime;
 		cl.oldServerTime = cl.serverStartTime;
+	}
+
+	// Added in Omaha: second input read after SV_Frame / client work, before the view
+	if ( Cvar_VariableIntegerValue( "cl_lowLatencyInput" ) ) {
+		if ( IN_PumpLate() ) {
+			Com_DispatchInputEvents();
+		}
+		CL_ApplyLateMouse();
 	}
 
 	cge->CG_DrawActiveFrame( cl.serverTime, cl.serverTime - cl.oldServerTime, stereo, clc.demoplaying );

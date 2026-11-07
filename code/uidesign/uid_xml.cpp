@@ -980,7 +980,7 @@ bool CollectAttrs(
 			"font-weight", "text-skew", "shape-rotation", "letter-spacing", "event", "target", "property", "name", "required", "default",
 		"version", "weight", "src", "value", "value-type", "visible-if", "set-value",
 		"wrap", "scroll", "index", "step-index", "set-index", "visible-if-index", "mode", "row-height",
-		"lifetime", "fade-duration",
+		"lifetime", "fade-duration", "history",
 		"border", "border-top", "border-right", "border-bottom", "border-left"
 		};
 		bool structural = false;
@@ -2879,6 +2879,7 @@ bool ParseDefinitions(ParseContext &ctx, XMLElement *defs)
 	const char *backdropStr = nullptr;
 	const char *pauseMenu = nullptr;
 	const char *scoreboardMenu = nullptr;
+	const char *chromeTargetStr = nullptr;
 
 	for (const tinyxml2::XMLAttribute *attr = defs->FirstAttribute(); attr; attr = attr->Next()) {
 		const char *name = attr->Name();
@@ -2898,6 +2899,9 @@ bool ParseDefinitions(ParseContext &ctx, XMLElement *defs)
 		} else if (std::strcmp(name, "scoreboard-menu") == 0) {
 			/* Added in Omaha: HUD companion scoreboard menu-id. */
 			scoreboardMenu = attr->Value();
+		} else if (std::strcmp(name, "chrome-target") == 0) {
+			/* Added in Omaha: chrome-target="overlay" paints chrome in the overlay phase. */
+			chromeTargetStr = attr->Value();
 		} else {
 			ctx.Error(loc, (std::string("unknown attribute on <definitions>: ") + name).c_str());
 			return false;
@@ -2909,6 +2913,20 @@ bool ParseDefinitions(ParseContext &ctx, XMLElement *defs)
 	if (hasMenuId && hasHudId) {
 		ctx.Error(loc, "<definitions> cannot set both menu-id and hud-id");
 		return false;
+	}
+	if (chromeTargetStr && chromeTargetStr[0]) {
+		if (!hasMenuId) {
+			ctx.Error(loc, "<definitions chrome-target> requires menu-id");
+			return false;
+		}
+		if (!std::strcmp(chromeTargetStr, "overlay")) {
+			ctx.doc->chromeInOverlay = true;
+		} else if (!std::strcmp(chromeTargetStr, "chrome")) {
+			ctx.doc->chromeInOverlay = false;
+		} else {
+			ctx.Error(loc, "chrome-target must be chrome or overlay");
+			return false;
+		}
 	}
 
 	if (hasMenuId) {

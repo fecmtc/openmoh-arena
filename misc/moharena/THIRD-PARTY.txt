@@ -1,12 +1,17 @@
-OpenMoH Arena - work by others in the optional modern UI
-========================================================
+OpenMoH Arena - work by others in this build
+============================================
 
-The modern UI is off unless the player turns it on in the launcher. It
-comes from Project: Omaha by JayRewd, a fork of OpenMoHAA published under
-the GNU General Public License, version 2 or later:
+The optional modern UI and the optional Omaha sound mixer come from
+Project: Omaha by JayRewd, a fork of OpenMoHAA published under the GNU
+General Public License, version 2 or later:
   https://github.com/JayRewd/omaha
 OpenMoH Arena removed parts of it and limits what it may change.
 OpenMoH Arena is not affiliated with or endorsed by Project: Omaha.
+
+The modern UI
+-------------
+
+The modern UI is off unless the player turns it on in the launcher.
 
 Code built into openmohaa.exe for the modern UI. The sources and the full
 license texts are in code/thirdparty of the OpenMoH Arena source code:
@@ -23,3 +28,26 @@ Files in main/zz_moharena_ui.pk3:
     version 1.1. The license is fonts/OFL.txt in the same pack.
   - ui/modern (menus, HUDs and their images) and sound/prom/hitmarkers:
     from Project: Omaha, as published in its repository.
+
+The Omaha sound mixer
+---------------------
+
+The Omaha mixer is off unless the player picks it (s_backend omaha);
+OpenAL stays the default.
+
+Code built into openmohaa.exe for the Omaha mixer. The sources and the
+full license texts are in code/thirdparty of the OpenMoH Arena source
+code; the notices that must travel with the program are in
+OMAHA-SOUND-LICENSES.txt next to this file:
+  - libmysofa by Symonics GmbH and Christian Hoene (BSD 3-clause), with
+    parts of the Speex resampler by Jean-Marc Valin and Thorvald Natvig
+    (BSD 3-clause)
+  - PFFFT by Julien Pommier, Hayati Ayguen and Dario Mambro, from
+    FFTPACK by UCAR (FFTPACK license)
+  - miniaudio by David Reid (Unlicense or MIT No Attribution)
+
+Files in main/sound/prom:
+  - hrtf/SADIE_KU100_DFC_256_order_fir_48000.sofa: the Neumann KU100
+    head-related transfer functions from the SADIE database, Copyright
+    University of York. Apache License 2.0. The license and the citation
+    are hrtf/SADIE_LICENSE.txt and hrtf/README.txt in the same folder.

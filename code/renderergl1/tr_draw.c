@@ -575,7 +575,8 @@ void Set2DWindow(int x, int y, int w, int h, float left, float right, float bott
 	}
 	R_IssuePendingRenderCommands();
 	// Added in MoH Arena: the UI render target is only used with the modern UI.
-	if (R_ModernUI()) {
+	/* Changed in Omaha: window setup alone must not force the lazy UI FBO bind. */
+	if (R_ModernUI() && !RE_UI2D_BindPending()) {
 		RE_UI2DTargetRebind();
 		if (RE_UI2DTargetIsActive()) {
 			/* Added in Omaha: Phase 2 — host/legacy FBO draws force full resolve. */

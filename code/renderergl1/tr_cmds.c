@@ -134,6 +134,10 @@ void R_IssuePendingRenderCommands( void ) {
 	if ( R_ModernUI() ) {
 		/* Added in Omaha: ui_perf_hud counter. */
 		tr_uiStats.issuePending++;
+		/* Added in Omaha: commands queued inside a lazily bound UI session target its FBO. */
+		if ( backEndData->commands.used && RE_UI2D_BindPending() ) {
+			RE_UI2DTargetRebind();
+		}
 	}
 	R_IssueRenderCommands( qfalse );
 }

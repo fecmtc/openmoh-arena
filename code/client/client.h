@@ -124,6 +124,10 @@ typedef struct {
 
 	int			mouseDx[2], mouseDy[2];	// added to by mouse events
 	int			mouseIndex;
+	// Added in Omaha: render-frame look output for cl_cmdfps-paced usercmds
+	usercmd_t	mouseCmd;			// BUTTON_ANY until the next usercmd
+	float		mouseStrafe[2];		// side, forward until the next usercmd
+	usercmd_t	predictCmd;			// newest usercmd with keys resampled this frame
 
 	int				mousex, mousey;
 	unsigned int	mouseButtons;
@@ -420,6 +424,7 @@ extern qboolean	scr_initialized;
 //
 extern	cvar_t	*cl_nodelta;
 extern	cvar_t	*cl_debugMove;
+extern	cvar_t	*cl_cmdfps; // Added in Omaha
 extern	cvar_t	*cl_noprint;
 extern	cvar_t	*cl_timegraph;
 extern	cvar_t	*cl_debuggraph;
@@ -446,6 +451,8 @@ extern	cvar_t	*cl_freelook;
 extern	cvar_t	*cl_mouseAccel;
 extern	cvar_t	*cl_mouseAccelOffset;
 extern	cvar_t	*cl_mouseAccelStyle;
+extern	cvar_t	*cl_mouseAccelPower; // Added in Omaha
+extern	cvar_t	*cl_mouseSensCap; // Added in Omaha
 extern	cvar_t	*cl_showMouseRate;
 
 extern	cvar_t	*cl_altbindings;
@@ -551,6 +558,7 @@ const char *CL_ConfigString( int index );
 void CL_StartDemoLoop( void );
 void CL_NextDemo( void );
 void CL_ReadDemoMessage( void );
+void CL_BeginDemoPlayback( const char *path, const char *arg );
 void CL_StopRecord_f(void);
 
 void CL_InitDownloads(void);
@@ -601,6 +609,8 @@ void CL_UpdateMouse();
 
 void CL_InitInput (void);
 void CL_ShutdownInput(void);
+void CL_ApplyLateMouse( void ); // Added in Omaha: late look before cgame view
+float CL_MouseAccelSensitivity( float rate ); // Added in Omaha: rate in counts/ms
 void CL_SendCmd (void);
 void CL_ClearState (void);
 void CL_ReadPackets (void);
@@ -767,6 +777,13 @@ void CL_WriteAVIVideoFrame( const byte *imageBuffer, int size );
 void CL_WriteAVIAudioFrame( const byte *pcmBuffer, int size );
 qboolean CL_CloseAVI( void );
 qboolean CL_VideoRecording( void );
+
+/* Added in Omaha: capture through the active sound host (snd_host.cpp). */
+qboolean S_Capture_Begin( void );
+void     S_Capture_End( void );
+void     S_Capture_Frame( int aviFps );
+qboolean S_Capture_Active( void );
+int      S_Capture_SampleRate( void );
 
 //
 // cl_consolecmds.cpp

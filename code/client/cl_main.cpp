@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_moharena.h" // Added in MoH Arena
 #include "cl_moharena_uipolicy.h" // Added in MoH Arena
 #include "cl_uirender.h"
+#include "cl_fpsbench.h"
 #include "../corepp/tiki.h"
 #include "../qcommon/cm_terrain.h"
 #include "../qcommon/localization.h"
@@ -83,6 +84,8 @@ cvar_t	*cl_sensitivity;
 cvar_t	*cl_mouseAccel;
 cvar_t	*cl_mouseAccelOffset;
 cvar_t	*cl_mouseAccelStyle;
+cvar_t	*cl_mouseAccelPower; // Added in Omaha
+cvar_t	*cl_mouseSensCap; // Added in Omaha
 cvar_t	*cl_showMouseRate;
 
 cvar_t	*cl_altbindings;
@@ -591,7 +594,12 @@ void CL_DemoCompleted( void )
 		}
 	}
 
+	// Added in Omaha: end the fps bench before disconnect so Abort is a no-op,
+	// then print after disconnect noise (and before nextdemo) so the stats are
+	// the last thing the player sees from the bench.
+	CL_FpsBench_DemoCompleted();
 	CL_Disconnect();
+	CL_FpsBench_PrintResults();
 	CL_NextDemo();
 }
 
@@ -612,7 +620,7 @@ void CL_ReadDemoMessage( void ) {
 	}
 
 	// get the sequence number
-	r = FS_Read( &s, 4, clc.demofile);
+	r = FS_Read( &s, 4, clc.demofile );
 	if ( r != 4 ) {
 		CL_DemoCompleted ();
 		return;
@@ -623,7 +631,7 @@ void CL_ReadDemoMessage( void ) {
 	MSG_Init( &buf, bufData, sizeof( bufData ) );
 
 	// get the length
-	r = FS_Read (&buf.cursize, 4, clc.demofile);
+	r = FS_Read( &buf.cursize, 4, clc.demofile );
 	if ( r != 4 ) {
 		CL_DemoCompleted ();
 		return;
@@ -730,13 +738,25 @@ void CL_PlayDemo_f( void ) {
 		Com_Error( ERR_DROP, "couldn't open %s", name);
 		return;
 	}
-	Q_strncpyz( clc.demoName, Cmd_Argv(1), sizeof( clc.demoName ) );
+	CL_BeginDemoPlayback( name, Cmd_Argv(1) );
+}
+
+/*
+====================
+CL_BeginDemoPlayback
+
+Added in Omaha: shared by CL_PlayDemo_f and fpsbench once the demo file
+is open; path is the opened file, arg the display name
+====================
+*/
+void CL_BeginDemoPlayback( const char *path, const char *arg ) {
+	Q_strncpyz( clc.demoName, arg, sizeof( clc.demoName ) );
 
     UI_CloseConsole();
 
 	clc.state = CA_CONNECTED;
 	clc.demoplaying = qtrue;
-	Q_strncpyz( clc.servername, Cmd_Argv(1), sizeof( clc.servername ) );
+	Q_strncpyz( clc.servername, arg, sizeof( clc.servername ) );
 
 	// read demo messages until connected
 	while ( clc.state >= CA_CONNECTED && clc.state < CA_PRIMED ) {
@@ -999,6 +1019,8 @@ void CL_Disconnect() {
 		FS_FCloseFile( clc.demofile );
 		clc.demofile = 0;
 	}
+	// Added in Omaha: leaving an unfinished fps bench restores its cvars
+	CL_FpsBench_Abort();
 
 	SCR_StopCinematic ();
 	S_ClearSoundBuffer();
@@ -2713,11 +2735,32 @@ CL_Frame
 
 ==================
 */
+/*
+==================
+CL_RememberMouseAccel
+
+Added in Omaha: keep the last nonzero cl_mouseAccel so the settings switch can restore it.
+==================
+*/
+static void CL_RememberMouseAccel( void ) {
+	static int lastModificationCount = -1;
+
+	if ( cl_mouseAccel->modificationCount == lastModificationCount ) {
+		return;
+	}
+	lastModificationCount = cl_mouseAccel->modificationCount;
+	if ( cl_mouseAccel->value != 0.0f ) {
+		Cvar_Set( "ui_om_mouseaccel_last", cl_mouseAccel->string );
+	}
+}
+
 void CL_Frame ( int msec ) {
 
 	if ( !com_cl_running->integer ) {
 		return;
 	}
+
+	CL_RememberMouseAccel(); // Added in Omaha
 
 #ifdef USE_CURL
 	if(clc.downloadCURLM) {
@@ -2889,6 +2932,9 @@ void CL_Frame ( int msec ) {
 
 	// decide on the serverTime to render
 	CL_SetCGameTime();
+
+	// Added in Omaha: fps bench frame timing
+	CL_FpsBench_Frame();
 
 	// set the time if we loaded a save
 	if( SV_DoSaveGame() )
@@ -3428,6 +3474,7 @@ void CL_InitRef( void ) {
 
 	ri.SKEL_GetBoneParent = CL_RefSKEL_GetBoneParent;
 	ri.SKEL_GetMorphWeightFrame = CL_RefSKEL_GetMorphWeightFrame;
+	ri.PresentGuard = Com_PresentGuard; // Added in Omaha
 
 	ret = GetRefAPI( REF_API_VERSION, &ri );
 
@@ -3706,13 +3753,21 @@ void CL_Init( void ) {
 	cl_sensitivity = Cvar_Get( "sensitivity", "5", CVAR_ARCHIVE );
     cl_mouseAccel = Cvar_Get("cl_mouseAccel", "0", CVAR_ARCHIVE);
     cl_freelook = Cvar_Get("cl_freelook", "1", CVAR_ARCHIVE);
-	// 0: legacy mouse acceleration
-	// 1: new implementation
+	// Changed in Omaha: 0 legacy, 1 power, 2 curve
+	// Changed in MoH Arena: legacy stays the default, as in the original game
 	cl_mouseAccelStyle = Cvar_Get( "cl_mouseAccelStyle", "0", CVAR_ARCHIVE );
-	// offset for the power function (for style 1, ignored otherwise)
-	// this should be set to the max rate value
+	Cvar_CheckRange(cl_mouseAccelStyle, 0, 2, qtrue);
+	// style 1: the rate at which the acceleration doubles the gain (0 turns it off)
+	// style 2: rate in counts/ms below which the curve stays linear
+	// Changed in MoH Arena: the default stays 5, the original value
 	cl_mouseAccelOffset = Cvar_Get( "cl_mouseAccelOffset", "5", CVAR_ARCHIVE );
-	Cvar_CheckRange(cl_mouseAccelOffset, 0.001f, 50000.0f, qfalse);
+	Cvar_CheckRange(cl_mouseAccelOffset, 0.0f, 50000.0f, qfalse);
+	// below 1 the exponent turns negative and the curve blows up
+	cl_mouseAccelPower = Cvar_Get( "cl_mouseAccelPower", "2", CVAR_ARCHIVE );
+	Cvar_CheckRange(cl_mouseAccelPower, 1.0f, 10.0f, qfalse);
+	// 0: no cap
+	cl_mouseSensCap = Cvar_Get( "cl_mouseSensCap", "0", CVAR_ARCHIVE );
+	Cvar_CheckRange(cl_mouseSensCap, 0.0f, 100.0f, qfalse);
 
 	cl_showMouseRate = Cvar_Get ("cl_showmouserate", "0", 0);
 
@@ -3814,6 +3869,8 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("demo", CL_PlayDemo_f);
 	Cmd_AddCommand ("cinematic", CL_PlayCinematic_f);
 	Cmd_AddCommand ("stoprecord", CL_StopRecord_f);
+	// Added in Omaha: embedded demo fps bench
+	CL_FpsBench_Init();
 	Cmd_AddCommand ("connect", CL_Connect_f);
 	Cmd_AddCommand ("menuconnect", CL_MenuConnect_f);
 	Cmd_AddCommand ("reconnect", CL_Reconnect_f);
@@ -3923,6 +3980,7 @@ void CL_Shutdown(const char* finalmsg, qboolean disconnect, qboolean quit) {
 	Cmd_RemoveCommand ("demo");
 	Cmd_RemoveCommand ("cinematic");
 	Cmd_RemoveCommand ("stoprecord");
+	CL_FpsBench_Shutdown();
 	Cmd_RemoveCommand ("connect");
 	Cmd_RemoveCommand ("localservers");
 	Cmd_RemoveCommand ("globalservers");

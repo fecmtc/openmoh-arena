@@ -2145,6 +2145,122 @@ static void CL_UIR_UpdateHudMenus(unsigned int time, qboolean applyWheel)
 	CL_UIMenu_UpdateAllWithPointer(time, &pointer);
 }
 
+/*
+ * Added in Omaha: mouse acceleration curve. Sensitivity (Y) against mouse speed
+ * in counts/ms (X), sampled from the same function CL_MouseMove uses.
+ */
+#define UIR_ACCEL_PREVIEW_SAMPLES 64
+
+static void cl_uir_paint_mouseaccel_preview(float x, float y, float w, float h)
+{
+	static uir_path_t curve;
+	static bool       curveInit = false;
+	const float       labelSize = 12.0f;
+	const float       padX = 8.0f;
+	const float       padTop = 22.0f;
+	const float       padBottom = 22.0f;
+	const float       baseSens = cl_sensitivity->value;
+	const int         style = cl_mouseAccelStyle->integer;
+	const bool        useCap = style >= 2;
+	const float       cap = useCap ? cl_mouseSensCap->value : 0.0f;
+	const float       offset = cl_mouseAccelOffset->value;
+	float             samples[UIR_ACCEL_PREVIEW_SAMPLES + 1];
+	float             labelRgba[4] = {1.0f, 1.0f, 1.0f, 0.7f};
+	uir_color_t       curveColor = {0.102f, 0.435f, 0.831f, 1.0f};
+	uir_color_t       baseColor = {1.0f, 1.0f, 1.0f, 0.25f};
+	uir_color_t       capColor = {0.85f, 0.35f, 0.3f, 0.7f};
+	uir_color_t       offsetColor = {1.0f, 1.0f, 1.0f, 0.35f};
+	uir_contour_t    *contour = nullptr;
+	float             gx;
+	float             gy;
+	float             gw;
+	float             gh;
+	float             xMax;
+	float             yMax;
+	float             dpi;
+	char              text[128];
+	int               i;
+
+	gx = x + padX;
+	gy = y + padTop;
+	gw = w - padX * 2.0f;
+	gh = h - padTop - padBottom;
+	if (gw <= 0.0f || gh <= 0.0f) {
+		return;
+	}
+
+	xMax = 40.0f;
+	if (style != 0 && offset * 2.0f > xMax) {
+		xMax = offset * 2.0f;
+	}
+
+	yMax = baseSens;
+	if (cap > yMax) {
+		yMax = cap;
+	}
+	for (i = 0; i <= UIR_ACCEL_PREVIEW_SAMPLES; i++) {
+		samples[i] = CL_MouseAccelSensitivity(xMax * (float)i / (float)UIR_ACCEL_PREVIEW_SAMPLES);
+		if (!std::isfinite(samples[i])) {
+			samples[i] = 0.0f;
+		}
+		if (samples[i] > yMax) {
+			yMax = samples[i];
+		}
+	}
+	yMax *= 1.15f;
+	if (!(yMax > 0.0f)) {
+		yMax = 1.0f;
+	}
+
+#define ACCEL_PX(rate) (gx + ((rate) / xMax) * gw)
+#define ACCEL_PY(sens) (gy + gh - ((sens) / yMax) * gh)
+
+	UIR_DrawSolidRect(gx, ACCEL_PY(baseSens) - 0.5f, gw, 1.0f, &baseColor);
+
+	if (cap > 0.0f) {
+		UIR_DrawSolidRect(gx, ACCEL_PY(cap) - 0.5f, gw, 1.0f, &capColor);
+	}
+
+	if (style != 0 && offset > 0.0f && offset < xMax) {
+		const float ox = ACCEL_PX(offset);
+		float       dy;
+
+		for (dy = 0.0f; dy < gh; dy += 7.0f) {
+			UIR_DrawSolidRect(ox - 0.5f, gy + dy, 1.0f, (gh - dy < 4.0f) ? gh - dy : 4.0f, &offsetColor);
+		}
+	}
+
+	if (!curveInit) {
+		UIR_PathInit(&curve);
+		curveInit = true;
+	}
+	UIR_PathClear(&curve);
+	if (UIR_PathBeginContour(&curve, &contour) == UIR_OK) {
+		for (i = 0; i <= UIR_ACCEL_PREVIEW_SAMPLES; i++) {
+			const float rate = xMax * (float)i / (float)UIR_ACCEL_PREVIEW_SAMPLES;
+			UIR_ContourAddPoint(contour, ACCEL_PX(rate), ACCEL_PY(samples[i]));
+		}
+		UIR_StrokePath2D(&curve, &curveColor, 2.0f, 0);
+	}
+
+#undef ACCEL_PX
+#undef ACCEL_PY
+
+	Com_sprintf(text, sizeof(text), "SENSITIVITY 0 - %.3g", yMax);
+	uir_browser_draw_text(gx, y + 4.0f, labelSize, text, labelRgba);
+
+	dpi = Cvar_VariableValue("ui_modernsettings_dpi");
+	if (dpi > 0.0f) {
+		Com_sprintf(
+			text, sizeof(text), "SPEED 0 - %.0f COUNTS/MS  (0 - %.0f CM/S AT %.0f DPI)",
+			xMax, xMax * 1000.0f / dpi * 2.54f, dpi
+		);
+	} else {
+		Com_sprintf(text, sizeof(text), "SPEED 0 - %.0f COUNTS/MS", xMax);
+	}
+	uir_browser_draw_text(gx, y + h - padBottom + 4.0f, labelSize, text, labelRgba);
+}
+
 static void uid_draw_host_region(const char *role, float x, float y, float w, float h, void *userdata)
 {
 	UID_PaintListMarkHostDraw();
@@ -2167,6 +2283,10 @@ static void uid_draw_host_region(const char *role, float x, float y, float w, fl
 
 	(void)userdata;
 	if (!role || w <= 0.0f || h <= 0.0f) {
+		return;
+	}
+	if (Q_stricmp(role, "mouseaccel-preview") == 0) {
+		cl_uir_paint_mouseaccel_preview(x, y, w, h);
 		return;
 	}
 	if (Q_stricmp(role, "server-list") == 0) {
@@ -2531,6 +2651,7 @@ static const char *const g_uidSoundRestartCvars[] = {
 	"s_speaker_type",
 	"s_khz",
 	"s_reverb",
+	"s_backend", /* Added in Omaha: omaha <-> OpenAL Soft */
 	"s_milesdriver",
 	NULL
 };
@@ -3315,7 +3436,8 @@ static int uid_query_collection_hud_messages(
 		out[written].nfields = 4;
 		out[written].fieldNames = slot->fieldNames;
 		out[written].fieldValues = slot->fieldValues;
-		out[written].flags = 0;
+		/* Added in Omaha: open compose pins chat rows so scrolled history does not fade. */
+		out[written].flags = (which == 2 && UIR_HudChat_IsPinned()) ? UID_COLLECTION_ITEM_PINNED : 0;
 		written++;
 	}
 	return written;
@@ -3684,8 +3806,6 @@ static int uid_query_options(const char *source, char **values, char **labels, i
 		"9", "1600 x 1200", "10", "2048 x 1536",
 	};
 	static const char *const displayMode[] = {"1", "Fullscreen", "2", "Borderless", "0", "Windowed"};
-	// Changed in MoH Arena: 85 is the game's own default
-	static const char *const maxFps[] = {"85", "85", "125", "125", "250", "250", "500", "500"};
 	// Changed in MoH Arena: the texture depth list; the screen depth is not a
 	// setting of the modern UI
 	static const char *const textureDepth[] = {"0", "Default", "16", "16-bit", "32", "32-bit"};
@@ -3744,7 +3864,6 @@ static int uid_query_options(const char *source, char **values, char **labels, i
 
 	UID_OPT_SRC("video-modes", videoModes);
 	UID_OPT_SRC("display-mode", displayMode);
-	UID_OPT_SRC("max-fps", maxFps);
 	UID_OPT_SRC("texture-depth", textureDepth);
 	UID_OPT_SRC("speaker-setup", speakerSetup);
 	UID_OPT_SRC("sample-rate", sampleRate);
@@ -4349,6 +4468,9 @@ void CL_UIR_CloseHudChat(void)
 	g_hudChatOpen = qfalse;
 	CL_UIVar_Set("ui_om_hud_chat_open", "0");
 	CL_UIVar_Set("ui_om_hud_chat_text", "");
+	/* Added in Omaha: back to the newest chat window; rows linger one lifetime, then fade. */
+	UIR_HudChat_ResetScroll();
+	UIR_HudChat_SetPinned(0);
 	/* Deactivate clears focus without re-CommitInput (avoids double submit). */
 	runtime = CL_UIR_ActiveHudRuntime();
 	if (runtime) {
@@ -4375,6 +4497,9 @@ void CL_UIR_OpenHudChat(int iMode)
 	CL_UIVar_Set("ui_om_hud_chat_label", CL_UIR_HudChatLabelForMode(iMode));
 	CL_UIVar_Set("ui_om_hud_chat_text", "");
 	CL_UIVar_SetValue("ui_om_hud_chat_mode", (float)iMode);
+	/* Added in Omaha: open compose shows the newest chat window pinned (no lifetime fade). */
+	UIR_HudChat_ResetScroll();
+	UIR_HudChat_SetPinned(1);
 	Key_SetCatcher(Key_GetCatcher() | KEYCATCH_UI);
 	IN_MouseOff();
 	CL_UIR_FocusHudChatInput();
@@ -5662,6 +5787,8 @@ static void CL_UIR_PushUiPxScale(void)
 		}
 	}
 	CL_UIMenu_ApplyUiPxScale(uiPxScale);
+	/* Added in Omaha: settings-slider drags re-lay out open FAKK consoles immediately. */
+	UI_ApplyFakkOverlayUiScale();
 }
 
 /*
@@ -5824,6 +5951,12 @@ static void CL_UIR_ChromeCallback(void *userdata)
 	CL_UIMenu_PaintChrome();
 }
 
+static void CL_UIR_OverlayChromeCallback(void *userdata)
+{
+	(void)userdata;
+	CL_UIMenu_PaintOverlayChrome();
+}
+
 static void CL_UIR_OverlayCallback(void *userdata)
 {
 	(void)userdata;
@@ -5836,6 +5969,12 @@ static void CL_UIR_HudChromeCallback(void *userdata)
 	CL_UIMenu_PaintChromeUpTo(4);
 }
 
+static void CL_UIR_HudOverlayChromeCallback(void *userdata)
+{
+	(void)userdata;
+	CL_UIMenu_PaintOverlayChromeUpTo(4);
+}
+
 static void CL_UIR_HudOverlayCallback(void *userdata)
 {
 	(void)userdata;
@@ -5846,9 +5985,11 @@ static void CL_UIR_SetDesignLayerCallbacks(qboolean enable)
 {
 	if (enable) {
 		UIR_CompositorSetChromeCallback(CL_UIR_ChromeCallback, NULL);
+		UIR_CompositorSetOverlayChromeCallback(CL_UIR_OverlayChromeCallback, NULL);
 		UIR_CompositorSetOverlayCallback(CL_UIR_OverlayCallback, NULL);
 	} else {
 		UIR_CompositorSetChromeCallback(NULL, NULL);
+		UIR_CompositorSetOverlayChromeCallback(NULL, NULL);
 		UIR_CompositorSetOverlayCallback(NULL, NULL);
 	}
 }
@@ -5914,6 +6055,9 @@ static void CL_UIR_RegisterSettingsCvars(void)
 	// and they follow the server's own hit message only
 	Cvar_Get("cg_hitmarker", "0", CVAR_ARCHIVE);
 	Cvar_Get("cg_hitmarker_sound", "classic", CVAR_ARCHIVE); /* Changed in Omaha */
+	// Added in Omaha: the HUD grenade charge bar. Changed in MoH Arena: off by
+	// default, so the HUD is the original until the player turns it on.
+	Cvar_Get("cg_grenade_charge_bar", "0", CVAR_ARCHIVE);
 	Cvar_Get("cg_rain", "1", CVAR_ARCHIVE);
 	Cvar_Get("cg_marks_add", "1", CVAR_ARCHIVE);
 	// the renderer registers cg_shadows first, with "1"; the cgame only adds the archive flag
@@ -6010,6 +6154,8 @@ void CL_UIR_RegisterCvars(void)
 	/* Added in Omaha: modern settings helpers (cm/360 + sensitivity mode). */
 	Cvar_Get("ui_modernsettings_dpi", "800", CVAR_ARCHIVE);
 	Cvar_Get("ui_modernsettings_sensitivity_mode", "sensitivity", CVAR_ARCHIVE);
+	/* Added in Omaha: cl_mouseAccel restored when the acceleration switch turns back on. */
+	Cvar_Get("ui_om_mouseaccel_last", "0.1", CVAR_ARCHIVE);
 	/* Added in Omaha: menu map backdrop catalog selection (sources.xml menu-map-views). */
 	ui_om_menu_map_view = Cvar_Get("ui_om_menu_map_view", "remagen", CVAR_ARCHIVE);
 	/* Added in Omaha: HUD pack selection (archived player setting). */
@@ -6657,6 +6803,22 @@ qboolean CL_UIR_KeyEvent(int key, qboolean down, unsigned time)
 		return qfalse;
 	}
 
+	/*
+	 * Added in Omaha: Ctrl+Up/Down scrolls the hud-chat backlog while compose is
+	 * open (plain arrows stay with the input's submit history). Compose already
+	 * owns keys, so this never shadows gameplay arrow binds.
+	 */
+	if (down && g_hudChatOpen && Key_IsDown(K_CTRL)) {
+		if (key == K_UPARROW || key == K_KP_UPARROW) {
+			UIR_HudChat_ScrollBy(1);
+			return qtrue;
+		}
+		if (key == K_DOWNARROW || key == K_KP_DOWNARROW) {
+			UIR_HudChat_ScrollBy(-1);
+			return qtrue;
+		}
+	}
+
 	if (down) {
 		/*
 		 * Fixed in Omaha: while capturing a keybind, MWHEEL* is the bind key —
@@ -7115,6 +7277,7 @@ void CL_UIR_DrawHudLayer(void)
 	}
 	if (!hadCallbacks) {
 		UIR_CompositorSetChromeCallback(CL_UIR_HudChromeCallback, NULL);
+		UIR_CompositorSetOverlayChromeCallback(CL_UIR_HudOverlayChromeCallback, NULL);
 		UIR_CompositorSetOverlayCallback(CL_UIR_HudOverlayCallback, NULL);
 	}
 	{
@@ -7127,6 +7290,7 @@ void CL_UIR_DrawHudLayer(void)
 	}
 	if (!hadCallbacks) {
 		UIR_CompositorSetChromeCallback(NULL, NULL);
+		UIR_CompositorSetOverlayChromeCallback(NULL, NULL);
 		UIR_CompositorSetOverlayCallback(NULL, NULL);
 	}
 	CL_UIR_ProfileEndSample("hud_layer");

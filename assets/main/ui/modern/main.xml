@@ -1,5 +1,6 @@
 <ui version="1">
-	<definitions menu-id="main" draw-order="8" backdrop="menu-map">
+	<!-- Fixed in Omaha: chrome-target=overlay — in-game main must not drop HUD retain; <model> previews queue from overlay-chrome. -->
+	<definitions menu-id="main" draw-order="8" backdrop="menu-map" chrome-target="overlay">
 		<import src="ui/modern/lib/theme.xml"/>
 		<import src="ui/modern/lib/shapes.xml"/>
 		<import src="ui/modern/lib/sources.xml"/>
@@ -48,7 +49,7 @@
 				</container>
 				<container id="menu_brand" type="horizontal" width="auto" height="100%" gap="16px"
 				           valign="center" padding="0 16px 0 0">
-					<label font="control" font-size="{var.text-display}" color="{var.color-white}" letter-spacing="4px">OPENMOH ARENA</label>
+					<label font="control" font-size="{var.text-display}" color="{var.color-white}" letter-spacing="4px">PROJECT: OMAHA</label>
 					<shape shape="allied-star" height="35px" width="35px" fill="{var.color-white}"/>
 				</container>
 			</container>
@@ -179,6 +180,8 @@
 										<use template="settings-keybind-row" label="Toggle First Person Spectate" binding="toggle_spectate_firstperson"/>
 										<use template="settings-keybind-row" label="Scoreboard Cursor" binding="toggle_scoreboard_cursor"/>
 										<use template="settings-keybind-row" label="Cycle Scoreboard Sort" binding="cycle_scoreboard_sort"/>
+										<use template="settings-keybind-row" label="Screenshot PNG" binding="screenshotPNG"/>
+										<use template="settings-keybind-row" label="Screenshot JPEG" binding="screenshotJPEG"/>
 								</container>
 								<container type="vertical" width="fill" height="auto" gap="8px" padding="0 0 0 4px">
 									<use template="settings-section-header" label="MOUSE"/>
@@ -188,8 +191,26 @@
 									<use template="settings-number-row" label="Mouse DPI" bind="cvar:ui_modernsettings_dpi" min="100" max="32000" step="50" commit="change" visible="{cvar.ui_modernsettings_sensitivity_mode == cm360}"/>
 									<use template="settings-cyclic-row" label="Zoom Sensitivity" bind="cvar:cg_zoomSensitivity" source="zoom-sensitivity-mode" commit="change"/>
 									<use template="settings-on-off-row" label="Invert mouse" bind="cvar:m_pitch" commit="change" value-type="invert-mouse"/>
+									<use template="settings-on-off-row" label="Mouse Acceleration" bind="cvar:cl_mouseAccel" commit="change" value-type="accel-toggle"/>
+									<!-- Added in Omaha: acceleration tuning, shown while acceleration is on. -->
+									<use template="settings-cyclic-row" label="Acceleration Style" bind="cvar:cl_mouseAccelStyle" source="mouse-accel-style" commit="change"
+									     visible="{cvar.cl_mouseAccel != 0}"/>
+									<container width="fill" height="auto" padding="8px 12px"
+									           visible="{cvar.cl_mouseAccel != 0 and (cvar.ui_om_settings_search == '' or icontains('Mouse Acceleration', cvar.ui_om_settings_search))}">
+										<container role="mouseaccel-preview" width="fill" height="140px" fill="{var.fill-control}"
+										           stroke="{var.stroke-border}" stroke-width="1px" shape="rectangle"/>
+									</container>
+									<use template="settings-slider-row" label="Acceleration" bind="cvar:cl_mouseAccel" min="0.01" max="5" step="0.01" commit="change"
+									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle == 1}"/>
+									<use template="settings-slider-row" label="Acceleration" bind="cvar:cl_mouseAccel" min="0.001" max="1" step="0.001" commit="change"
+									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle != 1}"/>
+									<use template="settings-slider-row" label="Acceleration Offset" bind="cvar:cl_mouseAccelOffset" min="0" max="50" step="0.1" commit="change"
+									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle != 0}"/>
+									<use template="settings-slider-row" label="Acceleration Power" bind="cvar:cl_mouseAccelPower" min="1" max="6" step="0.01" commit="change"
+									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle == 2}"/>
+									<use template="settings-slider-row" label="Sensitivity Cap" bind="cvar:cl_mouseSensCap" min="0" max="30" step="0.01" commit="change"
+									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle == 2}"/>
 									<use template="settings-on-off-row" label="Mouse smoothing" bind="cvar:m_filter" commit="change"/>
-									<use template="settings-on-off-row" label="Mouse Acceleration" bind="cvar:cl_mouseAccel" commit="change"/>
 									<use template="settings-slider-row" label="m_yaw" bind="cvar:m_yaw" min="0.001" max="1" step="0.001" commit="change"/>
 									<use template="settings-slider-row" label="m_pitch" bind="cvar:m_pitch" min="0.001" max="1" step="0.001" commit="change"
 									     value-type="pitch-magnitude"/>
@@ -209,7 +230,7 @@
 									<use template="settings-cyclic-row" label="Resolution" bind="cvar:r_mode" source="video-modes" commit="apply"/>
 									<use template="settings-cyclic-row" label="Refresh Rate" bind="cvar:r_displayRefresh" source="display-refresh" commit="apply"/>
 									<use template="settings-on-off-row" label="Vertical sync" bind="cvar:r_swapInterval" commit="apply"/>
-									<use template="settings-cyclic-row" label="Max FPS" bind="cvar:com_maxfps" source="max-fps" commit="change"/>
+									<use template="settings-slider-row" label="Max FPS" bind="cvar:com_maxfps" min="85" max="1000" step="1" commit="change"/>
 									<use template="settings-on-off-row" label="Draw FPS" bind="cvar:fps" commit="change"/>
 									<use template="settings-slider-row" label="Gamma" bind="cvar:r_gamma" min="0.5" max="3" step="0.05" commit="change"/>
 									<use template="settings-cyclic-row" label="Texture Color Depth" bind="cvar:r_texturebits" source="texture-depth" commit="apply"/>
@@ -239,10 +260,37 @@
 								<use template="settings-slider-row" label="Master Volume" bind="cvar:s_volume" min="0" max="100" step="1" commit="change" value-type="percent"/>
 								<use template="settings-slider-row" label="Music volume" bind="cvar:s_musicvolume" min="0" max="100" step="1" commit="change" value-type="percent"/>
 								<use template="settings-slider-row" label="Ambient volume" bind="cvar:s_ambientvolume" min="0" max="100" step="1" commit="change" value-type="percent"/>
-								<use template="settings-cyclic-row" label="Speaker Setup" bind="cvar:s_speaker_type" source="speaker-setup" commit="change"/>
+								<!-- Added in Omaha: host pick; speaker list depends on backend. -->
+								<use template="settings-cyclic-row" label="Audio Backend" bind="cvar:s_backend" source="audio-backend" commit="change"/>
+								<use template="settings-cyclic-row" label="Speaker Setup" bind="cvar:s_speaker_type" source="speaker-setup-omaha" commit="change"
+								     visible="{cvar.s_backend == omaha}"/>
+								<use template="settings-cyclic-row" label="Speaker Setup" bind="cvar:s_speaker_type" source="speaker-setup" commit="change"
+								     visible="{cvar.s_backend != omaha}"/>
 								<use template="settings-cyclic-row" label="Sound Quality" bind="cvar:s_khz" source="sample-rate" commit="change"/>
-								<use template="settings-cyclic-row" label="3D Sound Driver" bind="cvar:s_milesdriver" source="miles-driver" commit="change"/>
-								<use template="settings-on-off-row" label="EAX Reverb" bind="cvar:s_reverb" commit="change"/>
+								<use template="settings-on-off-row" label="EAX Reverb" bind="cvar:s_reverb" commit="change"
+								     visible="{cvar.s_backend != omaha}"/>
+								<!-- Added in Omaha: omaha-only mix / obstruction knobs.
+								     Pattern per option: header label, help blurb, then on/off. -->
+								<container type="vertical" width="100%" height="auto" gap="8px"
+								           visible="{cvar.s_backend == omaha}">
+									<use template="settings-section-header" label="OMAHA MIX"/>
+									<container type="vertical" width="100%" height="auto" gap="8px" padding="8px 12px" valign="start"
+									           visible="{(cvar.ui_om_settings_search == '' or icontains('Modern Mix', cvar.ui_om_settings_search))}">
+										<label width="fill" height="auto" font="body" font-size="{var.text-body}" valign="start" color="{var.color-primary}">Modern Mix</label>
+										<label width="100%" height="auto" font="body" font-size="{var.text-caption}"
+										       color="{var.color-muted}">Custom level balance for weapons, footsteps, and the rest of the mix.</label>
+										<use template="settings-on-off" bind="cvar:s_mix" commit="change"/>
+										<container width="fill" height="1px" fill="{var.fill-divider}"/>
+									</container>
+									<container type="vertical" width="100%" height="auto" gap="8px" padding="8px 12px" valign="start"
+									           visible="{(cvar.ui_om_settings_search == '' or icontains('Obstruction', cvar.ui_om_settings_search))}">
+										<label width="fill" height="auto" font="body" font-size="{var.text-body}" valign="start" color="{var.color-primary}">Obstruction</label>
+										<label width="100%" height="auto" font="body" font-size="{var.text-caption}"
+										       color="{var.color-muted}">Muffles sounds that are behind walls or other cover so they feel blocked.</label>
+										<use template="settings-on-off" bind="cvar:s_obstruction" commit="change"/>
+										<container width="fill" height="1px" fill="{var.fill-divider}"/>
+									</container>
+								</container>
 						</container>
 
 						<!-- GAMEPLAY -->
@@ -274,6 +322,8 @@
 								<use template="settings-cyclic-row" label="Weapons Bar" bind="cvar:ui_weaponsbar" source="weapons-bar" commit="change"
 								     visible="{cvar.cg_hud != 0}"/>
 								<use template="settings-on-off-row" label="Enable scoreboard cursor" bind="cvar:ui_om_scoreboard_disable_cursor" commit="change" off-value="1" on-value="0"/>
+								<use template="settings-on-off-row" label="Grenade charge bar" bind="cvar:cg_grenade_charge_bar" commit="change"
+								     visible="{cvar.cg_hud != 0}"/>
 								<use template="settings-section-header" label="GAMEPLAY"/>
 								<use template="settings-on-off-row" label="Always run" bind="cvar:cl_run" commit="change"/>
 								<use template="settings-on-off-row" label="Auto-switch Weapons" bind="cvar:cg_autoswitch" commit="change"/>

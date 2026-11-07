@@ -34,6 +34,7 @@ source tree, or write to the Free Software Foundation, Inc.,
 #include "uid_invoke.h"
 #include "uid_layout.h"
 #include "uid_modal.h"
+#include "uid_paint.h"
 #include "uid_menu_map_view.h"
 #include "uid_runtime.h"
 #include "uid_template.h"
@@ -209,6 +210,7 @@ struct FakeBackendState {
 	std::vector<LifetimeItem> lifetimeItems;
 	uint64_t                 lifetimeRevision = 1;
 	bool                     lifetimeFeedActive = false;
+	bool                     lifetimePinned = false; /* Added in Omaha: UID_COLLECTION_ITEM_PINNED */
 	/* Added in Omaha: per-byte advance for caret/layout measure tests (default 8). */
 	float                    fontMeasurePx = 8.0f;
 };
@@ -1025,7 +1027,7 @@ int fake_queryCollectionItems(const uid_collection_query_t *query, uid_collectio
 				out[written].nfields = 4;
 				out[written].fieldNames = msgFieldNames;
 				out[written].fieldValues = msgFieldValues[written];
-				out[written].flags = 0;
+				out[written].flags = g_fake->lifetimePinned ? UID_COLLECTION_ITEM_PINNED : 0;
 				written++;
 			}
 			return written;
@@ -3592,6 +3594,198 @@ void TestForeachLifetimeFade(void)
 	UID_DestroyDocument(doc);
 }
 
+/* Added in Omaha: pinned host items ignore lifetime, then linger one lifetime once unpinned. */
+void TestForeachLifetimePinned(void)
+{
+	static const char *kDoc = R"(
+<ui version="1">
+  <definitions>
+    <defaults type="vertical" width="100%" height="100%"/>
+  </definitions>
+  <canvas>
+    <container id="feed" type="vertical" width="200px" height="120px" source="hud-messages">
+      <foreach mode="all" lifetime="1000ms" fade-duration="400ms">
+        <label font="body" font-size="14px">{item.field.text}</label>
+      </foreach>
+    </container>
+  </canvas>
+</ui>
+)";
+	uid_limits_t lim;
+	UID_DefaultLimits(&lim);
+	uid_document_t *doc = UID_CreateDocument();
+	uid_diag_list_t diags(lim.maxDiagnostics);
+	FakeBackendState st;
+	uid_backend_t be = MakeFakeBackend(&st);
+	st.lifetimeFeedActive = true;
+	st.lifetimeItems.push_back({"msg_1", "one"});
+	st.lifetimeItems.push_back({"msg_2", "two"});
+
+	CHECK(UID_ParseXml("life_pin.xml", kDoc, std::strlen(kDoc), &lim, nullptr, doc, &diags) == UID_OK);
+	CHECK(UID_ExpandDocument(doc, &diags) == UID_OK);
+	CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
+
+	doc->updateTimeMs = 1000;
+	UID_SyncBindings(doc, &be);
+	uid_node_id_t fid = FindFirstForeach(doc);
+	CHECK(CountForeachWrapChildren(doc, fid) == 2);
+
+	/* Pinned well past lifetime: rows stay solid. */
+	st.lifetimePinned = true;
+	st.lifetimeRevision++;
+	doc->updateTimeMs = 6000;
+	UID_SyncBindings(doc, &be);
+	fid = FindFirstForeach(doc);
+	CHECK(CountForeachWrapChildren(doc, fid) == 2);
+
+	/* Pinned frame without host change must still refresh appear times. */
+	doc->updateTimeMs = 6050;
+	UID_SyncBindings(doc, &be);
+	fid = FindFirstForeach(doc);
+	CHECK(CountForeachWrapChildren(doc, fid) == 2);
+	if (CountForeachWrapChildren(doc, fid) > 0) {
+		const uid_node_id_t wrap = doc->nodes[static_cast<size_t>(fid)].children[0];
+		CHECK_EQ_F(doc->states[static_cast<size_t>(wrap)].lifetimeOpacityMul, 1.0, 1e-4);
+	}
+
+	/* Unpinned: lifetime restarts from the last pinned sync (6050). */
+	st.lifetimePinned = false;
+	st.lifetimeRevision++;
+	doc->updateTimeMs = 6100;
+	UID_SyncBindings(doc, &be);
+	fid = FindFirstForeach(doc);
+	CHECK(CountForeachWrapChildren(doc, fid) == 2);
+
+	doc->updateTimeMs = 7000; /* age 950: fading, still present */
+	UID_SyncBindings(doc, &be);
+	fid = FindFirstForeach(doc);
+	CHECK(CountForeachWrapChildren(doc, fid) == 2);
+	if (CountForeachWrapChildren(doc, fid) > 0) {
+		const uid_node_id_t wrap = doc->nodes[static_cast<size_t>(fid)].children[0];
+		const float alpha = doc->states[static_cast<size_t>(wrap)].lifetimeOpacityMul;
+		CHECK(alpha < 0.999f && alpha > 0.001f);
+	}
+
+	doc->updateTimeMs = 7100; /* age 1050: expired */
+	UID_SyncBindings(doc, &be);
+	fid = FindFirstForeach(doc);
+	CHECK(CountForeachWrapChildren(doc, fid) == 0);
+
+	UID_DestroyDocument(doc);
+}
+
+uid_node_id_t NodeId(uid_document_t *doc, const char *id);
+
+/* Added in Omaha: <input history="true"> Up/Down recall of submitted lines. */
+void TestInputSubmitHistory(void)
+{
+	static const char *kDoc = R"(
+<ui version="1">
+  <definitions>
+    <defaults type="vertical" width="auto" height="auto" padding="0" margin="0" gap="0"/>
+    <fonts><font id="body" src="fonts/x.ttf" weight="400"/></fonts>
+  </definitions>
+  <canvas>
+    <container id="root" type="vertical" width="400px" height="600px">
+      <container id="feed" type="vertical" width="300px" height="300px" source="hud-messages">
+        <foreach mode="all">
+          <label font="body" font-size="14px">{item.field.text}</label>
+        </foreach>
+        <input id="hist" type="text" width="200px" height="24px" font="body" font-size="16px"
+               bind="cvar:test_hist_a" commit="submit" history="true"/>
+      </container>
+      <input id="cap" type="text" width="200px" height="24px" font="body" font-size="16px"
+             bind="cvar:test_hist_cap" commit="submit" history="true"/>
+      <input id="plain" type="text" width="200px" height="24px" font="body" font-size="16px"
+             bind="cvar:test_hist_plain" commit="submit"/>
+    </container>
+  </canvas>
+</ui>
+)";
+	uid_limits_t lim;
+	UID_DefaultLimits(&lim);
+	uid_document_t *doc = UID_CreateDocument();
+	uid_diag_list_t diags(lim.maxDiagnostics);
+	FakeBackendState st;
+	uid_backend_t be = MakeFakeBackend(&st);
+
+	CHECK(UID_ParseXml("input_history.xml", kDoc, std::strlen(kDoc), &lim, nullptr, doc, &diags) == UID_OK);	CHECK(UID_ExpandDocument(doc, &diags) == UID_OK);
+	CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
+	UID_SyncBindings(doc, &be);
+	CHECK(UID_LayoutDocument(doc, 400, 600, 1.0f, 1.0f, &be, &diags) == UID_OK);
+
+	const uid_node_id_t hist = NodeId(doc, "hist");
+	const uid_node_id_t cap = NodeId(doc, "cap");
+	const uid_node_id_t plain = NodeId(doc, "plain");
+	const uid_node_id_t feed = NodeId(doc, "feed");
+	CHECK(hist >= 0 && cap >= 0 && plain >= 0 && feed >= 0);
+	if (hist < 0 || cap < 0 || plain < 0 || feed < 0) {
+		UID_DestroyDocument(doc);
+		return;
+	}
+
+	auto submit = [&](uid_node_id_t id, const char *text) {
+		doc->states[static_cast<size_t>(id)].editBuffer = text;
+		CHECK(UID_HandleKey(doc, UID_KEY_ENTER, true, 0, &be));
+	};
+	auto buffer = [&](uid_node_id_t id) { return doc->states[static_cast<size_t>(id)].editBuffer; };
+
+	UID_SetFocus(doc, hist, &be);
+	submit(hist, "one");
+	submit(hist, "two");
+	submit(hist, "two"); /* consecutive duplicate skipped */
+	submit(hist, "");    /* empty lines are not recorded */
+	doc->states[static_cast<size_t>(hist)].editBuffer = "";
+
+	const int selBefore = doc->states[static_cast<size_t>(feed)].collectionSelectedIndex;
+	CHECK(UID_HandleKey(doc, UID_KEY_DOWNARROW, true, 0, &be)); /* not browsing: no-op, still consumed */
+	CHECK(buffer(hist).empty());
+	CHECK(doc->states[static_cast<size_t>(feed)].collectionSelectedIndex == selBefore);
+
+	CHECK(UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be));
+	CHECK(buffer(hist) == "two");
+	CHECK(doc->states[static_cast<size_t>(hist)].caretCodepoint == 3);
+	CHECK(UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be));
+	CHECK(buffer(hist) == "one");
+	CHECK(UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be)); /* oldest: stays */
+	CHECK(buffer(hist) == "one");
+	CHECK(UID_HandleKey(doc, UID_KEY_DOWNARROW, true, 0, &be));
+	CHECK(buffer(hist) == "two");
+	CHECK(UID_HandleKey(doc, UID_KEY_DOWNARROW, true, 0, &be)); /* past newest: clears */
+	CHECK(buffer(hist).empty());
+	CHECK(doc->states[static_cast<size_t>(feed)].collectionSelectedIndex == selBefore);
+
+	/* Refocus resets the browse cursor to the newest line. */
+	CHECK(UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be));
+	CHECK(UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be));
+	CHECK(buffer(hist) == "one");
+	UID_SetFocus(doc, plain, &be);
+	UID_SetFocus(doc, hist, &be);
+	CHECK(UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be));
+	CHECK(buffer(hist) == "two");
+
+	/* Ring keeps the newest 20 lines. */
+	UID_SetFocus(doc, cap, &be);
+	for (int i = 0; i < 25; ++i) {
+		char line[16];
+		std::snprintf(line, sizeof(line), "l%d", i);
+		submit(cap, line);
+	}
+	for (int i = 0; i < 30; ++i) {
+		UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be);
+	}
+	CHECK(buffer(cap) == "l5");
+
+	/* Without history= arrows do not recall. */
+	UID_SetFocus(doc, plain, &be);
+	submit(plain, "x");
+	doc->states[static_cast<size_t>(plain)].editBuffer = "";
+	UID_HandleKey(doc, UID_KEY_UPARROW, true, 0, &be);
+	CHECK(buffer(plain).empty());
+
+	UID_DestroyDocument(doc);
+}
+
 void TestParseMinimal(void)
 {
 	uid_limits_t lim;
@@ -5377,6 +5571,69 @@ void TestInvertMouseBindSelected(void)
 	CHECK(UID_ResolveFillColor(doc, onId, &fillOn));
 	CHECK(fillOff.b > 0.5f);
 	CHECK(fillOn.b < 0.5f);
+
+	UID_DestroyDocument(doc);
+}
+
+/* Added in Omaha: accel-toggle shows any nonzero cl_mouseAccel as on and restores the last value. */
+void TestAccelToggleBind(void)
+{
+	static const char *kDoc = R"(
+<ui version="1">
+  <definitions>
+    <defaults type="vertical" width="100%" height="100%"/>
+    <fonts><font id="control" src="fonts/x.ttf" weight="600"/></fonts>
+  </definitions>
+  <canvas>
+    <container type="horizontal" width="100%" height="40px" gap="8px">
+      <button id="off" bind="cvar:cl_mouseAccel" value-type="accel-toggle" set-value="0" commit="change"
+              fill="{bind.selected ? #1A6FD4FF : #00000073}" color="#FFFFFFFF">Off</button>
+      <button id="on" bind="cvar:cl_mouseAccel" value-type="accel-toggle" set-value="1" commit="change"
+              fill="{bind.selected ? #1A6FD4FF : #00000073}" color="#FFFFFFFF">On</button>
+    </container>
+  </canvas>
+</ui>
+)";
+	uid_limits_t lim;
+	UID_DefaultLimits(&lim);
+	uid_document_t *doc = UID_CreateDocument();
+	uid_diag_list_t diags(lim.maxDiagnostics);
+	FakeBackendState st;
+	st.cvars["cl_mouseAccel"] = FakeCvar{"0.25", 0};
+	uid_backend_t be = MakeFakeBackend(&st);
+
+	CHECK(UID_ParseXml("accel_toggle.xml", kDoc, std::strlen(kDoc), &lim, nullptr, doc, &diags) == UID_OK);
+	CHECK(UID_ExpandDocument(doc, &diags) == UID_OK);
+	CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
+	CHECK(UID_LayoutDocument(doc, 320, 80, 1.0f, 1.0f, &be, &diags) == UID_OK);
+	UID_SyncBindings(doc, &be);
+
+	uid_node_id_t offId = doc->idIndex["off"];
+	uid_node_id_t onId = doc->idIndex["on"];
+	uid_color_t   fillOn{};
+	uid_color_t   fillOff{};
+	CHECK(UID_ResolveFillColor(doc, onId, &fillOn));
+	CHECK(UID_ResolveFillColor(doc, offId, &fillOff));
+	CHECK(fillOn.b > 0.5f);
+	CHECK(fillOff.b < 0.5f);
+
+	UID_SetFocus(doc, offId, &be);
+	CHECK(UID_HandleKey(doc, UID_KEY_ENTER, true, 0, &be));
+	CHECK(st.cvars["cl_mouseAccel"].value == "0");
+	CHECK(UID_ResolveFillColor(doc, offId, &fillOff));
+	CHECK(fillOff.b > 0.5f);
+
+	/* No remembered value yet: On falls back to 0.1. */
+	UID_SetFocus(doc, onId, &be);
+	CHECK(UID_HandleKey(doc, UID_KEY_ENTER, true, 0, &be));
+	CHECK(st.cvars["cl_mouseAccel"].value == "0.1");
+
+	UID_SetFocus(doc, offId, &be);
+	CHECK(UID_HandleKey(doc, UID_KEY_ENTER, true, 0, &be));
+	st.cvars["ui_om_mouseaccel_last"] = FakeCvar{"0.35", 0};
+	UID_SetFocus(doc, onId, &be);
+	CHECK(UID_HandleKey(doc, UID_KEY_ENTER, true, 0, &be));
+	CHECK(st.cvars["cl_mouseAccel"].value == "0.35");
 
 	UID_DestroyDocument(doc);
 }
@@ -8388,10 +8645,12 @@ static void RegisterTestSettingsCvars(FakeBackendState &st)
 		"fps", "cg_fov", "cg_drawviewmodel", "cg_hud", "cg_rain", "cg_marks_add", "cg_shadows",
 		"cg_effectdetail", "vss_draw", "com_blood", "in_mouse", "r_lodscale", "r_noborder",
 		"sensitivity", "m_pitch", "m_yaw", "m_filter", "cl_mouseAccel", "cl_run", "cg_zoomSensitivity",
+		"cl_mouseAccelStyle", "cl_mouseAccelOffset", "cl_mouseAccelPower", "cl_mouseSensCap", "ui_om_mouseaccel_last",
 		"r_mode", "r_fullscreen", "r_swapInterval", "com_maxfps", "r_gamma", "r_colorbits", "r_texturebits",
 		"ui_scale", "ui_om_menu_map_view", "r_picmip", "r_textureMode", "r_ext_compressed_textures",
 		"r_fastentlight", "r_fastdlights", "r_entlightmap", "r_flares", "r_drawstaticdecals",
-		"s_initsound", "s_volume", "s_musicvolume", "s_speaker_type", "s_khz", "s_milesdriver",
+		"s_initsound", "s_volume", "s_musicvolume", "s_speaker_type", "s_khz", "s_backend", "s_milesdriver",
+		"s_mix", "s_obstruction",
 		"s_doppler", "s_reverb", "s_mixahead", "s_muteWhenMinimized", "s_muteWhenUnfocused",
 		"ui_om_hud", "ui_weaponsbar", "cg_autoswitch", "ui_legacy",
 		"ui_om_settings_search", "ui_om_settings_tab", "ui_om_settings_apply_pending", "ui_om_main_panel",
@@ -8399,6 +8658,8 @@ static void RegisterTestSettingsCvars(FakeBackendState &st)
 		// Added in MoH Arena: the sizes of the parts of the "arena" HUD style
 		"ui_om_hud_compass_scale", "ui_om_hud_topbar_scale", "ui_om_hud_killfeed_size",
 		"ui_om_hud_messages_size", "ui_om_hud_chat_size", "ui_om_hud_weapon_scale",
+		// Added in MoH Arena: the switch for the HUD grenade charge bar
+		"cg_grenade_charge_bar",
 		nullptr,
 	};
 
@@ -10262,8 +10523,43 @@ static void TestMenuMetadataParse(void)
 	CHECK(doc->menuId == "stats");
 	CHECK(doc->drawOrder == 6);
 	CHECK(doc->menuBackdrop == UID_MENU_BACKDROP_MENU_MAP);
+	CHECK(!doc->chromeInOverlay);
 
 	UID_DestroyDocument(doc);
+}
+
+/* Added in Omaha: chrome-target="overlay" moves menu chrome into the overlay phase. */
+static void TestMenuMetadataChromeTarget(void)
+{
+	uid_limits_t lim;
+	UID_DefaultLimits(&lim);
+	uid_parse_io_t parseIo = MakeTestParseIo();
+	struct {
+		const char *defs;
+		bool        ok;
+		bool        overlay;
+	} cases[] = {
+		{"menu-id=\"a\" draw-order=\"4\" chrome-target=\"overlay\"", true, true},
+		{"menu-id=\"a\" draw-order=\"4\" chrome-target=\"chrome\"", true, false},
+		{"menu-id=\"a\" draw-order=\"4\" chrome-target=\"bogus\"", false, false},
+		{"hud-id=\"h\" hud-label=\"H\" draw-order=\"4\" pause-menu=\"p\" scoreboard-menu=\"s\" "
+		 "chrome-target=\"overlay\"",
+		 false, false},
+	};
+	for (const auto &tc : cases) {
+		const std::string xml = std::string("<ui version=\"1\"><definitions ") + tc.defs
+			+ "><fonts/></definitions><canvas><container id=\"root\" type=\"vertical\" "
+			  "width=\"100px\" height=\"100px\"/></canvas></ui>";
+		uid_document_t *doc = UID_CreateDocument();
+		uid_diag_list_t diags(lim.maxDiagnostics);
+		const bool ok = UID_ParseXml("chrome_target.xml", xml.c_str(), xml.size(), &lim, &parseIo, doc, &diags)
+			== UID_OK && !diags.HasErrors();
+		CHECK(ok == tc.ok);
+		if (tc.ok) {
+			CHECK(doc->chromeInOverlay == tc.overlay);
+		}
+		UID_DestroyDocument(doc);
+	}
 }
 
 static void TestMenuMetadataDrawOrderBounds(void)
@@ -10990,6 +11286,242 @@ static void TestDmPauseModernMenuLoads(void)
 	CHECK(!diags.HasErrors());
 	CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
 	CHECK(!diags.HasErrors());
+	UID_DestroyDocument(doc);
+}
+
+/*
+ * Added in Omaha: chrome-target="overlay" menus with <model> (dm_pause team
+ * panel, main profile) queue previews from the compositor OVERLAY_CHROME layer
+ * and the previews draw on both the connected and disconnected frame paths.
+ */
+extern "C" void (*g_uirStubPreviewDrawHook)(const uir_rect_t *destPx, const uir_model_preview_params_t *params);
+
+struct OverlayChromeProbe {
+	uid_document_t          *doc = nullptr;
+	uid_backend_t           *be = nullptr;
+	int                      queuedOk = 0;
+	int                      queuedRejected = 0;
+	std::vector<std::string> log;
+	std::vector<uir_rect_t>  drawn;
+};
+
+static OverlayChromeProbe *g_ocProbe = nullptr;
+
+static void oc_queue_model_preview(const uid_model_preview_desc_t *desc)
+{
+	uir_rect_t                 r = {desc->x, desc->y, desc->w, desc->h};
+	uir_model_preview_params_t p;
+	std::memset(&p, 0, sizeof(p));
+	/* Same as the client host: a document with models never replays its paint list. */
+	UID_PaintListMarkHostDraw();
+	if (UIR_QueueModelPreview(&r, &p) == UIR_OK) {
+		g_ocProbe->queuedOk++;
+	} else {
+		g_ocProbe->queuedRejected++;
+	}
+}
+
+static void oc_preview_draw(const uir_rect_t *destPx, const uir_model_preview_params_t *params)
+{
+	(void)params;
+	g_ocProbe->log.push_back(UIR_CompositorPhase() == UIR_PHASE_PREVIEWS ? "preview" : "preview:bad-phase");
+	g_ocProbe->drawn.push_back(*destPx);
+}
+
+static void oc_layer_chrome(void *ud)
+{
+	(void)ud;
+	g_ocProbe->log.push_back("chrome");
+}
+
+static void oc_layer_overlay_chrome(void *ud)
+{
+	(void)ud;
+	g_ocProbe->log.push_back("overlay-chrome");
+	UID_PaintChrome(g_ocProbe->doc, g_ocProbe->be);
+}
+
+static void oc_layer_overlay(void *ud)
+{
+	(void)ud;
+	g_ocProbe->log.push_back("overlay");
+	UID_PaintOverlay(g_ocProbe->doc, g_ocProbe->be);
+}
+
+/* Pre-fix scheduling: overlay-chrome menus painted chrome inside the overlay layer. */
+static void oc_layer_overlay_legacy(void *ud)
+{
+	(void)ud;
+	g_ocProbe->log.push_back("overlay");
+	UID_PaintChrome(g_ocProbe->doc, g_ocProbe->be);
+	UID_PaintOverlay(g_ocProbe->doc, g_ocProbe->be);
+}
+
+static std::string OcJoinLog(void)
+{
+	std::string s;
+	for (size_t i = 0; i < g_ocProbe->log.size(); i++) {
+		if (i) {
+			s += ' ';
+		}
+		s += g_ocProbe->log[i];
+	}
+	return s;
+}
+
+static void OcRunFrame(bool disconnected, uir_layer_fn overlayChrome, uir_layer_fn overlay)
+{
+	uir_viewport_t vp;
+
+	g_ocProbe->queuedOk = 0;
+	g_ocProbe->queuedRejected = 0;
+	g_ocProbe->log.clear();
+	g_ocProbe->drawn.clear();
+	UIR_CompositorReset();
+	UIR_ViewportMake(0, 0, 1280, 720, &vp);
+	UIR_CompositorSetChromeCallback(oc_layer_chrome, nullptr);
+	UIR_CompositorSetOverlayChromeCallback(overlayChrome, nullptr);
+	UIR_CompositorSetOverlayCallback(overlay, nullptr);
+	if (disconnected) {
+		CHECK(UIR_BeginDisconnectedFrame(&vp, 0) == UIR_OK);
+		CHECK(UIR_EndDisconnectedFrame() == UIR_OK);
+	} else {
+		CHECK(UIR_BeginOverlayFrame(&vp, 0) == UIR_OK);
+		CHECK(UIR_EndOverlayFrame() == UIR_OK);
+	}
+	CHECK(UIR_CompositorPhase() == UIR_PHASE_IDLE);
+	UIR_CompositorSetChromeCallback(nullptr, nullptr);
+	UIR_CompositorSetOverlayChromeCallback(nullptr, nullptr);
+	UIR_CompositorSetOverlayCallback(nullptr, nullptr);
+}
+
+static void OcCheckModelsBothFramePaths(
+	uid_document_t *doc, uid_backend_t *be, const char *modelIdA, const char *modelIdB
+)
+{
+	OverlayChromeProbe probe;
+	probe.doc = doc;
+	probe.be = be;
+	g_ocProbe = &probe;
+	g_uirStubPreviewDrawHook = oc_preview_draw;
+	be->queueModelPreview = oc_queue_model_preview;
+
+	uid_node_id_t a = NodeId(doc, modelIdA);
+	uid_node_id_t b = NodeId(doc, modelIdB);
+	CHECK(a >= 0 && b >= 0);
+	if (a < 0 || b < 0) {
+		g_uirStubPreviewDrawHook = nullptr;
+		g_ocProbe = nullptr;
+		return;
+	}
+	const uid_rect_t boxA = doc->states[(size_t)a].contentBox;
+	const uid_rect_t boxB = doc->states[(size_t)b].contentBox;
+	CHECK(boxA.w > 1.0f && boxA.h > 1.0f);
+	CHECK(boxB.w > 1.0f && boxB.h > 1.0f);
+
+	for (int disconnected = 0; disconnected < 2; disconnected++) {
+		OcRunFrame(disconnected != 0, oc_layer_overlay_chrome, oc_layer_overlay);
+		CHECK(probe.queuedOk == 2);
+		CHECK(probe.queuedRejected == 0);
+		const std::string got = OcJoinLog();
+		if (got != "chrome overlay-chrome preview preview overlay") {
+			std::fprintf(stderr, "  %s frame order: %s\n", disconnected ? "disconnected" : "overlay", got.c_str());
+		}
+		CHECK(got == "chrome overlay-chrome preview preview overlay");
+		CHECK(probe.drawn.size() == 2);
+		if (probe.drawn.size() == 2) {
+			CHECK_EQ_F(probe.drawn[0].x, boxA.x, 0.01);
+			CHECK_EQ_F(probe.drawn[0].y, boxA.y, 0.01);
+			CHECK_EQ_F(probe.drawn[0].w, boxA.w, 0.01);
+			CHECK_EQ_F(probe.drawn[0].h, boxA.h, 0.01);
+			CHECK_EQ_F(probe.drawn[1].x, boxB.x, 0.01);
+			CHECK_EQ_F(probe.drawn[1].w, boxB.w, 0.01);
+		}
+
+		/* Negative control: the old schedule (chrome inside overlay) drops every model. */
+		OcRunFrame(disconnected != 0, nullptr, oc_layer_overlay_legacy);
+		CHECK(probe.queuedOk == 0);
+		CHECK(probe.queuedRejected == 2);
+		CHECK(probe.drawn.empty());
+	}
+
+	be->queueModelPreview = nullptr;
+	g_uirStubPreviewDrawHook = nullptr;
+	g_ocProbe = nullptr;
+	UIR_CompositorReset();
+}
+
+static bool ReadModernFixture(const char *relPath, std::string *out)
+{
+	std::string path = std::string(UID_TEST_FIXTURE_DIR) + "/" + relPath;
+	FILE       *f = std::fopen(path.c_str(), "rb");
+	CHECK(f != nullptr);
+	if (!f) {
+		return false;
+	}
+	std::fseek(f, 0, SEEK_END);
+	long sz = std::ftell(f);
+	std::fseek(f, 0, SEEK_SET);
+	out->assign((size_t)sz, '\0');
+	CHECK(std::fread(out->data(), 1, (size_t)sz, f) == (size_t)sz);
+	std::fclose(f);
+	return true;
+}
+
+static void TestDmPauseTeamModelsOverlayChrome(void)
+{
+	std::string xml;
+	if (!ReadModernFixture("menus/dm_pause.xml", &xml)) {
+		return;
+	}
+	uid_limits_t lim;
+	UID_DefaultLimits(&lim);
+	uid_document_t *doc = UID_CreateDocument();
+	uid_diag_list_t diags(lim.maxDiagnostics);
+	uid_parse_io_t  parseIo = MakeTestParseIo();
+	FakeBackendState st;
+	uid_backend_t    be = MakeFakeBackend(&st);
+	st.cvars["ui_om_pause_panel"] = FakeCvar{"team", 0};
+	st.cvars["cg_gametype"] = FakeCvar{"2", 2};
+	st.cvars["ui_dm_playermodel_set"] = FakeCvar{"american_army", 0};
+	st.cvars["ui_dm_playergermanmodel_set"] = FakeCvar{"german_wehrmacht_soldier", 0};
+
+	CHECK(UID_ParseXml("ui/modern/menus/dm_pause.xml", xml.c_str(), xml.size(), &lim, &parseIo, doc, &diags) == UID_OK);
+	CHECK(!diags.HasErrors());
+	CHECK(doc->chromeInOverlay);
+	CHECK(UID_ExpandDocument(doc, &diags) == UID_OK);
+	CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
+	UID_SyncBindings(doc, &be);
+	CHECK(UID_LayoutDocument(doc, 1280, 720, 1.0f, 1.0f, &be, &diags) == UID_OK);
+	OcCheckModelsBothFramePaths(doc, &be, "team_allies_model", "team_axis_model");
+	UID_DestroyDocument(doc);
+}
+
+static void TestMainProfileModelsOverlayChrome(void)
+{
+	std::string xml;
+	if (!ReadModernFixture("main.xml", &xml)) {
+		return;
+	}
+	uid_limits_t lim;
+	UID_DefaultLimits(&lim);
+	uid_document_t *doc = UID_CreateDocument();
+	uid_diag_list_t diags(lim.maxDiagnostics);
+	uid_parse_io_t  parseIo = MakeTestParseIo();
+	FakeBackendState st;
+	uid_backend_t    be = MakeFakeBackend(&st);
+	st.cvars["ui_om_modal"] = FakeCvar{"", 0};
+	st.cvars["ui_om_main_panel"] = FakeCvar{"play", 0};
+	st.cvars["ui_dm_playermodel_set"] = FakeCvar{"american_army", 0};
+	st.cvars["ui_dm_playergermanmodel_set"] = FakeCvar{"german_wehrmacht_soldier", 0};
+
+	CHECK(UID_ParseXml("ui/modern/main.xml", xml.c_str(), xml.size(), &lim, &parseIo, doc, &diags) == UID_OK);
+	CHECK(doc->chromeInOverlay);
+	CHECK(UID_ExpandDocument(doc, &diags) == UID_OK);
+	CHECK(UID_CompileDocument(doc, &diags) == UID_OK);
+	UID_SyncBindings(doc, &be);
+	CHECK(UID_LayoutDocument(doc, 1280, 720, 1.0f, 1.0f, &be, &diags) == UID_OK);
+	OcCheckModelsBothFramePaths(doc, &be, "preview_allies", "preview_axis");
 	UID_DestroyDocument(doc);
 }
 
@@ -12115,6 +12647,7 @@ int main(void)
 	TestBindSelectedNumericMatch();
 	TestBindSelectedCommitApplyStages();
 	TestInvertMouseBindSelected();
+	TestAccelToggleBind();
 	TestUseVisibleAndSearchOrPrecedence();
 	TestValueTypeTransforms();
 	TestSteppedNumberDisplay();
@@ -12169,6 +12702,7 @@ int main(void)
 	TestShapeCvarBackedProps();
 	TestIntrinsicShapePropScale();
 	TestMenuMetadataParse();
+	TestMenuMetadataChromeTarget();
 	TestMenuMetadataDrawOrderBounds();
 	TestMenuMetadataMissingDrawOrder();
 	TestMenuMetadataPeekFixtures();
@@ -12185,10 +12719,14 @@ int main(void)
 	TestClassicHudLayoutGeometry();
 	TestMessageCollectionPaint();
 	TestForeachLifetimeFade();
+	TestForeachLifetimePinned();
+	TestInputSubmitHistory();
 	TestHudAndMenuIdMutuallyExclusive();
 	TestScoreboardMenuLoads();
 	TestDmPauseMenuLoadsAndMapsUrcRects();
 	TestDmPauseModernMenuLoads();
+	TestDmPauseTeamModelsOverlayChrome();
+	TestMainProfileModelsOverlayChrome();
 	TestScoreboardCollectionForeach();
 	TestScoreboardForeachUseTemplate();
 	TestCollectionRowVisibilityFollowsFieldChange();

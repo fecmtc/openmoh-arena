@@ -35,19 +35,13 @@
 
 		<!-- display-refresh is host-backed (SDL modes); see artifacts/research/display-refresh-sources.md -->
 
-		<source id="max-fps" default="125">
-			<item value="85" label="85"/>
-			<item value="125" label="125"/>
-			<item value="250" label="250"/>
-			<item value="500" label="500"/>
-		</source>
-
 		<source id="texture-depth" default="0">
 			<item value="0" label="Default"/>
 			<item value="16" label="16-bit"/>
 			<item value="32" label="32-bit"/>
 		</source>
 
+		<!-- OpenAL Soft: full speaker layouts including surround. -->
 		<source id="speaker-setup" default="0">
 			<item value="0" label="Two Speakers"/>
 			<item value="1" label="Headphones"/>
@@ -55,20 +49,22 @@
 			<item value="3" label="Quad Speakers"/>
 		</source>
 
+		<!-- Omaha host: stereo + headphones HRTF only (no surround/quad). -->
+		<source id="speaker-setup-omaha" default="0">
+			<item value="0" label="Stereo"/>
+			<item value="1" label="HRTF"/>
+		</source>
+
+		<!-- Changed in MoH Arena: OpenAL Soft is the default host. -->
+		<source id="audio-backend" default="openal">
+			<item value="openal" label="OpenAL Soft"/>
+			<item value="omaha" label="Omaha"/>
+		</source>
+
 		<source id="sample-rate" default="44">
 			<item value="11" label="11 kHz"/>
 			<item value="22" label="22 kHz"/>
 			<item value="44" label="44 kHz"/>
-		</source>
-
-		<source id="miles-driver" default="auto">
-			<item value="auto" label="Auto"/>
-			<item value="DirectSound3D Hardware Support" label="DirectSound3D"/>
-			<item value="Creative Labs EAX 2 (TM)" label="Creative EAX 2"/>
-			<item value="Creative Labs EAX (TM)" label="Creative EAX"/>
-			<item value="Aureal A3D 2.0 (TM)" label="Aureal A3D 2.0"/>
-			<item value="Dolby Surround" label="Dolby Surround"/>
-			<item value="Miles Fast 2D Positional Audio" label="2D Positional"/>
 		</source>
 
 		<source id="picmip" default="1">
@@ -101,6 +97,13 @@
 			<item value="0.5" label="Performance"/>
 			<item value="1.1" label="Balanced"/>
 			<item value="1.5" label="High Detail"/>
+		</source>
+
+		<!-- Added in Omaha: 0 legacy, 1 power, 2 curve. -->
+		<source id="mouse-accel-style" default="0">
+			<item value="0" label="Legacy"/>
+			<item value="1" label="Power"/>
+			<item value="2" label="Curve"/>
 		</source>
 
 		<!-- Added in Omaha: zoom mouse scale mode (modern UI). -->

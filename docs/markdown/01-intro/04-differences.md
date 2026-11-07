@@ -469,6 +469,38 @@ own differences.
 - A character that a font of the original UI lacks no longer writes a line
   to the console for each frame. The two messages are for developers now
   (`developer 1`).
+- From v0.4.0 on, more parts of Project: Omaha. Each one is off, or works as
+  before, until the player changes it:
+  - A second sound mixer, the Omaha mixer, picked with `s_backend omaha`.
+    The default stays `openal`, OpenMoHAA's own mixer. The change takes
+    effect after `snd_restart` or a restart of the game. The Omaha mixer
+    plays through miniaudio and has no limit on the number of voices. With
+    `s_speaker_type 1` (headphones) it gives 3D sound with the SADIE KU100
+    set in `main/sound/prom/hrtf`; it has no surround, so it turns a
+    surround speaker type into headphones. Its `s_mix 1` (the default) plays
+    footsteps louder (1.35 times) and the other players' gunfire softer
+    (0.65 times); `s_mix 0` turns that off. When it cannot start, OpenAL
+    plays for that session.
+  - `cl_cmdfps`: with `0` (the default) the client sends one command each
+    frame, as before. Any other value is held to 85-125: the client then
+    sends commands at that rate while it draws at `com_maxfps`.
+  - `com_maxfps` above 1000 is held with a limiter in microseconds; the
+    original limiter could not hold it. 1000 and below keep the original
+    limiter, so frame times and the physics are unchanged.
+    `cl_lowLatencyInput 1` (off by default) reads the mouse again just before
+    the view is drawn.
+  - `screenshotPNG` takes a lossless screenshot. F12 keeps the player's bind.
+  - Mouse acceleration has a third style, Curve (`cl_mouseAccelStyle 2`,
+    with `cl_mouseAccelPower` and `cl_mouseSensCap`). Legacy (`0`) stays the
+    default and `cl_mouseAccelOffset` stays 5. With an offset of 0 the Power
+    style leaves the sensitivity as it is instead of dividing by zero.
+  - In the modern UI only: a grenade charge bar (`cg_grenade_charge_bar`,
+    off by default), the sound mixer's settings, a Max FPS slider from 85 to
+    1000 (332-334 still refused), the chat's history and Ctrl scroll, the
+    UI Scale setting for the consoles and the chat, and a lower cost per
+    frame.
+  - The `fpsbench` command plays a benchmark demo that the release does not
+    ship yet.
 
 ### Server-side
 

@@ -54,9 +54,11 @@ Each release on the
 Windows builds for x64 (64-bit Windows) and x86 (32-bit Windows).
 
 Each zip holds the game's executables and libraries, the pack of the
-[optional modern UI](#optional-modern-ui) (`main/zz_moharena_ui.pk3`),
-`COPYING.txt`, `SOURCE-OFFER.txt`, `THIRD-PARTY.txt` and `SHA256SUMS.txt`. The
-release notes name the commit the builds were made from.
+[optional modern UI](#optional-modern-ui) (`main/zz_moharena_ui.pk3`), the
+headphone set of the [Omaha sound mixer](#sound) (`main/sound/prom/hrtf`),
+`COPYING.txt`, `SOURCE-OFFER.txt`, `THIRD-PARTY.txt`,
+`OMAHA-SOUND-LICENSES.txt` and `SHA256SUMS.txt`. The release notes name the
+commit the builds were made from.
 
 These are the builds that [MoH Arena Guard](https://moharena.com/anti-cheat)
 accepts.
@@ -65,12 +67,15 @@ anywhere else, even from the same source.
 
 Builds for Linux and macOS are not published yet.
 
+From v0.4.0 on there is a second build, with its own releases tagged
+`vX.Y.Z-reloaded`: see [MoHAA-Reloaded builds](#mohaa-reloaded-builds).
+
 ## Installing on Windows
 
 1. Download the zip for your Windows: x64 for 64-bit Windows, x86 for 32-bit.
 2. Extract it into your Medal of Honor: Allied Assault folder, the one that
-   holds `main`. The zip has a `main` folder of its own with one file, which
-   goes into yours.
+   holds `main`. The zip has a `main` folder of its own, with the modern UI's
+   pack and the headphone set, which goes into yours.
 3. Start `launch_openmohaa_base.exe` (Allied Assault),
    `launch_openmohaa_spearhead.exe` (Spearhead) or
    `launch_openmohaa_breakthrough.exe` (Breakthrough), or pick one of them in
@@ -105,9 +110,32 @@ lists what players see. In short:
   text typed into it leaves as Windows-1252, the game's text.
 * A dedicated server built from this code no longer lets a grenade go through
   terrain (the "nade bug").
+* More parts of Project: Omaha, each off or as before until the player
+  changes it: a second [sound mixer](#sound), `cl_cmdfps` to send commands at
+  a fixed rate (held to 85-125), a limiter for `com_maxfps` above 1000,
+  `screenshotPNG`, a Curve style of mouse acceleration, and in the modern UI a
+  grenade charge bar, the sound settings and a Max FPS slider.
 
 OpenMoH Arena uses the same network protocol as OpenMoHAA, so it joins the
 same servers.
+
+## Sound
+
+From v0.4.0 on the game has two sound mixers, picked with the cvar
+`s_backend`:
+
+| `s_backend` | Mixer |
+|---|---|
+| `openal` (default) | OpenMoHAA's own mixer, on OpenAL Soft, unchanged |
+| `omaha` | The mixer of Project: Omaha, on miniaudio. With `s_speaker_type 1` (headphones) it gives 3D sound with the SADIE KU100 set in `main/sound/prom/hrtf`. It has no surround: it turns a surround speaker type into headphones. |
+
+The change takes effect after `snd_restart` or a restart of the game. MoH
+Arena Guard has an "Omaha sound mixer" box for it. When the Omaha mixer cannot
+start, OpenAL plays for that session.
+
+With the Omaha mixer, `s_mix 1` (its default) plays footsteps louder and the
+other players' gunfire softer, as Project: Omaha made it; `s_mix 0` turns that
+off.
 
 ## Optional modern UI
 
@@ -136,6 +164,20 @@ not complete in it yet.
 See `docs/modern-ui/README.md` for how it is built and what was left out, and
 `misc/moharena/THIRD-PARTY.txt` for the credits and licences of the parts by
 others.
+
+## MoHAA-Reloaded builds
+
+The `mohaa-reloaded` branch is OpenMoH Arena on top of
+[MoHAA-Reloaded](https://github.com/fortemoh/MoHAA-Reloaded) by pstngh, with
+testing and ideas by notuern: a fork of OpenMoHAA with a Vulkan renderer, SDL3
+and movement as in the original game. It carries the MoH Arena changes of this
+branch except the modern UI and a few parts of Project: Omaha (that branch's
+README lists them), and has the Omaha sound mixer as well.
+
+Its releases are tagged `vX.Y.Z-reloaded` and come for Windows x64 and Linux
+x64. MoH Arena Guard accepts both builds and finds out by itself which one a
+game folder holds. OpenMoH Arena is not affiliated with or endorsed by
+MoHAA-Reloaded.
 
 ## Building
 

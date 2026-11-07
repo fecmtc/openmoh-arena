@@ -29,6 +29,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 unsigned	frame_msec;
 int			old_com_frameTime;
 
+// Added in Omaha: usercmd / pmove rate (85..125), independent of render FPS
+cvar_t		*cl_cmdfps;
+// Added in Omaha: late mouse before cgame view
+cvar_t		*cl_lowLatencyInput;
+// Added in Omaha: render-frame resample of the newest usercmd; consume no taps
+static qboolean	cl_keepLatches;
+
 /*
 ===============================================================================
 
@@ -384,6 +391,30 @@ void CL_AdjustAngles( void ) {
 
 /*
 ================
+CL_MoveKeyState
+
+Added in Omaha: CL_KeyState, but a tap since the last usercmd counts fully
+(usercmds can be several render frames apart).
+================
+*/
+static float CL_MoveKeyState( kbutton_t *key ) {
+	const qboolean tapped = key->wasPressed;
+	float          val;
+
+	// Changed in MoH Arena: with cl_cmdfps off, the original key state
+	if ( !cl_cmdfps->integer ) {
+		return CL_KeyState( key );
+	}
+	if ( cl_keepLatches ) {
+		return ( key->active || tapped ) ? 1.0f : 0.0f;
+	}
+	val             = CL_KeyState( key );
+	key->wasPressed = qfalse;
+	return tapped ? 1.0f : val;
+}
+
+/*
+================
 CL_KeyMove
 
 Sets the usercmd_t based on key states
@@ -398,19 +429,19 @@ void CL_KeyMove( usercmd_t *cmd ) {
 	up = 0;
 	movespeed = 127;
 	if ( in_strafe.active ) {
-		side += movespeed * CL_KeyState (&in_right);
-		side -= movespeed * CL_KeyState (&in_left);
+		side += movespeed * CL_MoveKeyState (&in_right);
+		side -= movespeed * CL_MoveKeyState (&in_left);
 	}
 
-	side += movespeed * CL_KeyState (&in_moveright);
-	side -= movespeed * CL_KeyState (&in_moveleft);
+	side += movespeed * CL_MoveKeyState (&in_moveright);
+	side -= movespeed * CL_MoveKeyState (&in_moveleft);
 
 
-	up += movespeed * CL_KeyState (&in_up);
-	up -= movespeed * CL_KeyState (&in_down);
+	up += movespeed * CL_MoveKeyState (&in_up);
+	up -= movespeed * CL_MoveKeyState (&in_down);
 
-	forward += movespeed * CL_KeyState (&in_forward);
-	forward -= movespeed * CL_KeyState (&in_back);
+	forward += movespeed * CL_MoveKeyState (&in_forward);
+	forward -= movespeed * CL_MoveKeyState (&in_back);
 
 	cmd->forwardmove = ClampChar( forward );
 	cmd->rightmove = ClampChar( side );
@@ -599,6 +630,63 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 
 /*
 =================
+CL_MouseAccelSensitivity
+
+Added in Omaha: sensitivity for a mouse speed in counts per millisecond.
+Style 0 is legacy (linear in speed). Style 1 is power, one axis of the per-axis curve (needs frame_msec).
+Style 2 is the offset curve; cl_mouseSensCap applies only there.
+=================
+*/
+float CL_MouseAccelSensitivity( float rate ) {
+	float sens;
+	float cap;
+	int   style;
+
+	sens = cl_sensitivity->value;
+	if (cl_mouseAccel->value == 0.0f) {
+		return sens;
+	}
+
+	style = cl_mouseAccelStyle->integer;
+	if (style == 0) {
+		return sens + rate * cl_mouseAccel->value;
+	}
+
+	if (style == 1) {
+		float offset = cl_mouseAccelOffset->value;
+		float msec;
+		float counts;
+		float power;
+		float out;
+
+		if (offset <= 0.0f || rate <= 0.0f) {
+			return sens;
+		}
+		msec = (frame_msec < 1) ? 1.0f : (float)frame_msec;
+		counts = rate * msec;
+		power = powf(rate / offset, cl_mouseAccel->value);
+		out = sens * (counts + power * offset);
+		return out / counts;
+	}
+
+	{
+		float base = (rate - cl_mouseAccelOffset->value) * cl_mouseAccel->value;
+
+		// powf of a negative base is NaN
+		if (base > 0.0f) {
+			sens += powf(base, cl_mouseAccelPower->value - 1.0f);
+		}
+	}
+
+	cap = cl_mouseSensCap->value;
+	if (cap > 0.0f && sens > cap) {
+		sens = cap;
+	}
+	return sens;
+}
+
+/*
+=================
 CL_MouseMove
 =================
 */
@@ -607,7 +695,8 @@ void CL_MouseMove( usercmd_t *cmd ) {
 	float	cgameSensitivity;
 
 	// allow mouse smoothing
-	if (m_filter->integer)
+	// Changed in Omaha: cl_lowLatencyInput reads the mouse again this frame; raw deltas only
+	if (m_filter->integer && !(cl_lowLatencyInput && cl_lowLatencyInput->integer))
 	{
 		mx = (cl.mouseDx[0] + cl.mouseDx[1]) * 0.5f;
 		my = (cl.mouseDy[0] + cl.mouseDy[1]) * 0.5f;
@@ -625,43 +714,46 @@ void CL_MouseMove( usercmd_t *cmd ) {
     if (mx == 0.0f && my == 0.0f)
         return;
 
-	if (cl_mouseAccel->value != 0.0f)
+	// Changed in Omaha: style 2 is the offset curve, shared with the settings preview.
+	// Style 0 and 1 keep their previous formulas.
+	if (cl_mouseAccel->value != 0.0f && cl_mouseAccelStyle->integer == 1)
 	{
-		if(cl_mouseAccelStyle->integer == 0)
+		float rate[2];
+		float power[2];
+		float offset;
+
+		offset = cl_mouseAccelOffset->value;
+		if (offset > 0.0f)
 		{
-			float accelSensitivity;
-			float rate;
-			
-			rate = sqrt(mx * mx + my * my) / (float) frame_msec;
-
-			accelSensitivity = cl_sensitivity->value + rate * cl_mouseAccel->value;
-			mx *= accelSensitivity;
-			my *= accelSensitivity;
-			
-			if(cl_showMouseRate->integer)
-				Com_Printf("rate: %f, accelSensitivity: %f\n", rate, accelSensitivity);
-		}
-		else
-		{
-			float rate[2];
-			float power[2];
-
-			// sensitivity remains pretty much unchanged at low speeds
-			// cl_mouseAccel is a power value to how the acceleration is shaped
-			// cl_mouseAccelOffset is the rate for which the acceleration will have doubled the non accelerated amplification
-			// NOTE: decouple the config cvars for independent acceleration setup along X and Y?
-
 			rate[0] = fabs(mx) / (float) frame_msec;
 			rate[1] = fabs(my) / (float) frame_msec;
-			power[0] = powf(rate[0] / cl_mouseAccelOffset->value, cl_mouseAccel->value);
-			power[1] = powf(rate[1] / cl_mouseAccelOffset->value, cl_mouseAccel->value);
+			power[0] = powf(rate[0] / offset, cl_mouseAccel->value);
+			power[1] = powf(rate[1] / offset, cl_mouseAccel->value);
 
-			mx = cl_sensitivity->value * (mx + ((mx < 0) ? -power[0] : power[0]) * cl_mouseAccelOffset->value);
-			my = cl_sensitivity->value * (my + ((my < 0) ? -power[1] : power[1]) * cl_mouseAccelOffset->value);
+			mx = cl_sensitivity->value * (mx + ((mx < 0) ? -power[0] : power[0]) * offset);
+			my = cl_sensitivity->value * (my + ((my < 0) ? -power[1] : power[1]) * offset);
 
 			if(cl_showMouseRate->integer)
 				Com_Printf("ratex: %f, ratey: %f, powx: %f, powy: %f\n", rate[0], rate[1], power[0], power[1]);
 		}
+		else
+		{
+			mx *= cl_sensitivity->value;
+			my *= cl_sensitivity->value;
+		}
+	}
+	else if (cl_mouseAccel->value != 0.0f)
+	{
+		float accelSensitivity;
+		float rate;
+
+		rate = sqrt(mx * mx + my * my) / (float) frame_msec;
+		accelSensitivity = CL_MouseAccelSensitivity(rate);
+		mx *= accelSensitivity;
+		my *= accelSensitivity;
+
+		if(cl_showMouseRate->integer)
+			Com_Printf("rate: %f, accelSensitivity: %f\n", rate, accelSensitivity);
 	}
 	else
 	{
@@ -683,13 +775,20 @@ void CL_MouseMove( usercmd_t *cmd ) {
 	cmd->buttons |= BUTTON_ANY;
 
 	// add mouse X/Y movement to cmd
-	if(in_strafe.active)
-		cmd->rightmove = ClampChar(cmd->rightmove + m_side->value * mx);
-	else
+	// Changed in Omaha: mouse strafe accumulates until the next usercmd (CL_CreateCmd)
+	// Changed in MoH Arena: only with cl_cmdfps on; otherwise it goes in this cmd
+	if(in_strafe.active) {
+		if (cl_cmdfps->integer)
+			cl.mouseStrafe[0] += m_side->value * mx;
+		else
+			cmd->rightmove = ClampChar(cmd->rightmove + m_side->value * mx);
+	} else
 		cl.viewangles[YAW] -= m_yaw->value * mx;
 
 	if ((in_mlooking || cl_freelook->integer) && !in_strafe.active)
 		cl.viewangles[PITCH] += m_pitch->value * my;
+	else if (cl_cmdfps->integer)
+		cl.mouseStrafe[1] -= m_forward->value * my;
 	else
 		cmd->forwardmove = ClampChar(cmd->forwardmove - m_forward->value * my);
 
@@ -728,7 +827,8 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		if ( in_buttons[i].active || in_buttons[i].wasPressed ) {
 			cmd->buttons |= 1 << i;
 		}
-		in_buttons[i].wasPressed = qfalse;
+		if ( !cl_keepLatches ) // Changed in Omaha
+			in_buttons[i].wasPressed = qfalse;
 	}
 
 	if (UI_MenuActive() || UI_ConsoleIsOpen()) {
@@ -739,8 +839,8 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		cmd->buttons |= BUTTON_RUN;
 	}
 
-	if (cge) {
-		// send weapon commands from cg
+	if (cge && !cl_keepLatches) {
+		// send weapon commands from cg (Changed in Omaha: consumed per call, so phys ticks only)
 		cmd->buttons |= cge->CG_WeaponCommandButtonBits();
 	}
 
@@ -786,7 +886,10 @@ usercmd_t CL_CreateCmd( void ) {
 	VectorCopy( cl.viewangles, oldAngles );
 
 	// keyboard angle adjustment
-	CL_AdjustAngles ();
+	// Changed in MoH Arena: with cl_cmdfps on, CL_ApplyRenderLook does it every frame
+	if ( !cl_cmdfps->integer ) {
+		CL_AdjustAngles ();
+	}
 
 	Com_Memset( &cmd, 0, sizeof( cmd ) );
 
@@ -795,17 +898,28 @@ usercmd_t CL_CreateCmd( void ) {
 	// get basic movement from keyboard
 	CL_KeyMove( &cmd );
 
-	// get basic movement from mouse
-	CL_MouseMove( &cmd );
+	if ( !cl_cmdfps->integer ) {
+		// get basic movement from mouse
+		CL_MouseMove( &cmd );
+	} else {
+		// Changed in Omaha: mouse look ran per render frame (CL_ApplyRenderLook); add its strafe
+		cmd.buttons |= cl.mouseCmd.buttons;
+		cmd.rightmove = ClampChar( cmd.rightmove + (int)cl.mouseStrafe[0] );
+		cmd.forwardmove = ClampChar( cmd.forwardmove + (int)cl.mouseStrafe[1] );
+	}
+	cl.mouseCmd.buttons = 0;
+	cl.mouseStrafe[0] = cl.mouseStrafe[1] = 0;
 
 	// get basic movement from joystick
 	CL_JoystickMove( &cmd );
 
-	// check to make sure the angles haven't wrapped
-	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
-	} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
+	if ( !cl_cmdfps->integer ) {
+		// check to make sure the angles haven't wrapped
+		if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
+			cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
+		} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
+			cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
+		}
 	}
 
 	// store out the final values
@@ -842,6 +956,14 @@ void CL_CreateNewCommands( void ) {
 
 	// no need to create usercmds until we have a gamestate
 	if ( clc.state < CA_PRIMED ) {
+		return;
+	}
+
+	// Added in Omaha: wait for 1000/cl_cmdfps ms of serverTime (a stalled clock while
+	// connecting must not block cmds; unsigned also passes a backwards map_restart)
+	// Changed in MoH Arena: only when cl_cmdfps is on (0, the default, is the original rate)
+	if ( cl_cmdfps->integer && clc.state == CA_ACTIVE && (unsigned)( cl.serverTime - cl.cmds[cl.cmdNumber & CMD_MASK].serverTime )
+			< (unsigned)( 1000 / Com_Clamp( 85, 125, cl_cmdfps->integer ) ) ) {
 		return;
 	}
 
@@ -1156,12 +1278,89 @@ void CL_WritePacket( void ) {
 
 /*
 =================
+CL_ApplyRenderLook
+
+Added in Omaha: keyboard / mouse look every render frame, written into the newest
+usercmd so prediction tracks it between cl_cmdfps ticks.
+=================
+*/
+static void CL_ApplyRenderLook( void ) {
+	const unsigned savedFrameMsec = frame_msec;
+	vec3_t         oldAngles;
+	int            i;
+
+	VectorCopy( cl.viewangles, oldAngles );
+	frame_msec = (unsigned)Com_Clamp( 1, 200, cls.frametime );
+	CL_AdjustAngles();
+	CL_MouseMove( &cl.mouseCmd );
+	frame_msec = savedFrameMsec;
+
+	// check to make sure the angles haven't wrapped
+	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
+		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
+	} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
+		cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
+	}
+
+	for ( i = 0; i < 3; i++ ) {
+		cl.cmds[cl.cmdNumber & CMD_MASK].angles[i] = ANGLE2SHORT( cl.viewangles[i] );
+	}
+}
+
+/*
+=================
+CL_ApplyLateMouse
+
+Added in Omaha: mouse look only (no CL_AdjustAngles — that already ran this frame).
+Called after a late SDL pump just before CG_DrawActiveFrame so the view uses the
+freshest deltas. When cl_lowLatencyInput is on, CL_MouseMove skips m_filter (raw deltas).
+=================
+*/
+void CL_ApplyLateMouse( void ) {
+	const unsigned savedFrameMsec = frame_msec;
+	vec3_t         oldAngles;
+	int            i;
+
+	if ( !cl_lowLatencyInput || !cl_lowLatencyInput->integer ) {
+		return;
+	}
+	if ( clc.state < CA_PRIMED || paused->integer ) {
+		return;
+	}
+
+	VectorCopy( cl.viewangles, oldAngles );
+	frame_msec = (unsigned)Com_Clamp( 1, 200, cls.frametime );
+	CL_MouseMove( &cl.mouseCmd );
+	frame_msec = savedFrameMsec;
+
+	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
+		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
+	} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
+		cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
+	}
+
+	for ( i = 0; i < 3; i++ ) {
+		const short a = ANGLE2SHORT( cl.viewangles[i] );
+		cl.cmds[cl.cmdNumber & CMD_MASK].angles[i] = a;
+		cl.predictCmd.angles[i] = a;
+	}
+
+	cl_keepLatches        = qtrue;
+	cl.predictCmd.buttons = 0;
+	CL_CmdButtons( &cl.predictCmd );
+	cl_keepLatches = qfalse;
+}
+
+/*
+=================
 CL_SendCmd
 
 Called every frame to builds and sends a command packet to the server.
 =================
 */
 void CL_SendCmd( void ) {
+	int oldCmdNumber;
+
 	// don't send any message if not connected
 	if ( clc.state < CA_CONNECTED ) {
 		return;
@@ -1172,8 +1371,29 @@ void CL_SendCmd( void ) {
 		return;
 	}
 
+	// Changed in MoH Arena: only with cl_cmdfps on
+	if ( cl_cmdfps->integer && clc.state >= CA_PRIMED ) {
+		CL_ApplyRenderLook();
+	}
+	oldCmdNumber = cl.cmdNumber;
+
 	// we create commands even if a demo is playing,
 	CL_CreateNewCommands();
+
+	// Added in Omaha: no new usercmd yet; resample keys into a prediction-only copy of
+	// the newest one, and skip the duplicate packet unless reliable commands wait
+	cl.predictCmd = cl.cmds[cl.cmdNumber & CMD_MASK];
+	if ( cl_cmdfps->integer && cl.cmdNumber == oldCmdNumber && clc.state >= CA_PRIMED ) {
+		cl_keepLatches        = qtrue;
+		cl.predictCmd.buttons = 0;
+		CL_CmdButtons( &cl.predictCmd );
+		CL_KeyMove( &cl.predictCmd );
+		cl_keepLatches = qfalse;
+
+		if ( clc.state == CA_ACTIVE && clc.reliableSequence <= clc.reliableAcknowledge ) {
+			return;
+		}
+	}
 
 	// don't send a packet if the last packet was sent too recently
 	if ( !CL_ReadyToSendPacket() ) {
@@ -1270,6 +1490,11 @@ void CL_InitInput( void ) {
 
 	cl_nodelta = Cvar_Get ("cl_nodelta", "0", 0);
 	cl_debugMove = Cvar_Get ("cl_debugMove", "0", 0);
+	// Changed in MoH Arena: off by default (the original rate, one usercmd per frame);
+	//  any other value is held to 85..125 so commands never reach the 333 fps physics
+	cl_cmdfps = Cvar_Get ("cl_cmdfps", "0", CVAR_ARCHIVE);
+	// Added in Omaha: late mouse before cgame view
+	cl_lowLatencyInput = Cvar_Get( "cl_lowLatencyInput", "0", CVAR_ARCHIVE );
 }
 
 /*

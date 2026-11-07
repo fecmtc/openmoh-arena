@@ -50,6 +50,7 @@ set(CLIENT_SOURCES
     ${SOURCE_DIR}/client/cl_killfeed_classify.cpp
     ${SOURCE_DIR}/client/cl_killfeed.cpp
     ${SOURCE_DIR}/client/cl_modern_browser.cpp
+    ${SOURCE_DIR}/client/cl_fpsbench.cpp
     ${SOURCE_DIR}/client/cl_scoreboard_host.cpp
     ${SOURCE_DIR}/client/cl_uiserverlist.cpp
     ${SOURCE_DIR}/client/cl_uisoundpicker.cpp
@@ -66,7 +67,21 @@ set(CLIENT_SOURCES
     ${SOURCE_DIR}/client/snd_info.cpp
     ${SOURCE_DIR}/client/snd_mem_new.cpp
     ${SOURCE_DIR}/client/snd_miles_new.cpp
-    ${SOURCE_DIR}/client/snd_openal_new.cpp
+    ${SOURCE_DIR}/client/snd_host.cpp
+    ${SOURCE_DIR}/client/snd_host_openal.cpp
+)
+if(USE_OMAHA_SOUND)
+    list(APPEND CLIENT_SOURCES
+        ${SOURCE_DIR}/client/omaha/snd_category.c
+        ${SOURCE_DIR}/client/omaha/snd_hrtf_omaha.cpp
+        ${SOURCE_DIR}/client/omaha/snd_omaha.cpp
+        ${SOURCE_DIR}/client/omaha/snd_omaha_overlay.cpp
+        ${SOURCE_DIR}/client/omaha/snd_render_omaha.cpp
+        ${SOURCE_DIR}/client/omaha/snd_render_select.cpp
+        ${SOURCE_DIR}/client/omaha/snd_stream_async.cpp
+    )
+endif()
+list(APPEND CLIENT_SOURCES
     ${SOURCE_DIR}/client/usignal.cpp
     ${SOURCE_DIR}/sdl/sdl_input.c
     ${SOURCE_DIR}/sdl/sdl_mouse.c

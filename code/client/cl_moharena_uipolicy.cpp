@@ -95,6 +95,8 @@ static const char *const moharenaUISensitivityModes[] = {"sensitivity", "cm360",
 static const char *const moharenaUIZoomModes[]        = {"off", "legacy", "screen", NULL};
 static const char *const moharenaUITextureBits[]      = {"0", "16", "32", NULL};
 static const char *const moharenaUISoundRates[]       = {"11", "22", "44", NULL};
+// Added in MoH Arena: the sound hosts (from Omaha)
+static const char *const moharenaUISoundBackends[]    = {"openal", "omaha", NULL};
 
 static const char *const moharenaUITextureModes[] = {
     "GL_NEAREST",
@@ -143,7 +145,12 @@ static const moharenaUISetting_t moharenaUISettings[] = {
     {"m_pitch",                            MOHARENA_UI_MAGNITUDE, 0.001,  1,                    NULL,                       qtrue },
     {"m_yaw",                              MOHARENA_UI_NUMBER,    0.001,  1,                    NULL,                       qtrue },
     {"m_filter",                           MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
-    {"cl_mouseAccel",                      MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
+    // Changed in MoH Arena: the acceleration slider (from Omaha) sets an amount, not only on/off
+    {"cl_mouseAccel",                      MOHARENA_UI_NUMBER,    0,      20,                   NULL,                       qtrue },
+    {"cl_mouseAccelStyle",                 MOHARENA_UI_WHOLE,     0,      2,                    NULL,                       qtrue },
+    {"cl_mouseAccelOffset",                MOHARENA_UI_NUMBER,    0,      50000,                NULL,                       qtrue },
+    {"cl_mouseAccelPower",                 MOHARENA_UI_NUMBER,    1,      10,                   NULL,                       qtrue },
+    {"cl_mouseSensCap",                    MOHARENA_UI_NUMBER,    0,      100,                  NULL,                       qtrue },
 
     // Video
     {"r_fullscreen",                       MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
@@ -180,6 +187,9 @@ static const moharenaUISetting_t moharenaUISettings[] = {
     {"s_khz",                              MOHARENA_UI_CHOICE,    0,      0,                    moharenaUISoundRates,       qtrue },
     {"s_milesdriver",                      MOHARENA_UI_CHOICE,    0,      0,                    moharenaUISoundDrivers,     qtrue },
     {"s_reverb",                           MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
+    {"s_backend",                          MOHARENA_UI_CHOICE,    0,      0,                    moharenaUISoundBackends,    qtrue },
+    {"s_mix",                              MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
+    {"s_obstruction",                      MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
 
     // HUD and gameplay
     {"ui_om_hud",                          MOHARENA_UI_NAME,      0,      63,                   NULL,                       qtrue },
@@ -198,6 +208,7 @@ static const moharenaUISetting_t moharenaUISettings[] = {
     {"cg_autoswitch",                      MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
     {"cg_hitmarker",                       MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
     {"cg_hitmarker_sound",                 MOHARENA_UI_NAME,      0,      63,                   NULL,                       qtrue },
+    {"cg_grenade_charge_bar",              MOHARENA_UI_SWITCH,    0,      1,                    NULL,                       qtrue },
 
     // Written by the weapon and vote menus; not settings
     {"ui_weaponsign",                      MOHARENA_UI_CHOICE,    0,      0,                    moharenaUIWeaponSigns,      qfalse},
@@ -235,6 +246,8 @@ static const char *const moharenaUIBinds[] = {
     "toggle_spectate_firstperson",
     "toggle_scoreboard_cursor",
     "cycle_scoreboard_sort",
+    "screenshotPNG",
+    "screenshotJPEG",
 };
 
 // Every command a menu button may run. # stands for a number of one to five

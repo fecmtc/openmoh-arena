@@ -100,6 +100,7 @@ struct uid_collection_entry_t {
 	std::string                        value;
 	std::string                        label;
 	std::map<std::string, std::string> fields;
+	uint32_t                           flags = 0; /* Added in Omaha: UID_COLLECTION_ITEM_* */
 };
 
 struct uid_node_def_t {
@@ -118,7 +119,7 @@ struct uid_node_def_t {
 	std::string                    openModal; /* Added in Omaha: modal= id opens relative/fullscreen modal instead of procedural overlay */
 
 	/* Added in Omaha: bind value transforms / visibility / two-button set-value */
-	std::string                    valueType;  /* percent|invert-mouse|pitch-magnitude|cm360|display-mode */
+	std::string                    valueType;  /* percent|invert-mouse|accel-toggle|pitch-magnitude|cm360|display-mode */
 	std::string                    visibleIf;  /* cvar:name=value (legacy) */
 	std::string                    enabledIf;   /* cvar:name=value (legacy) */
 	std::string                    visibleExpr; /* {bool expr} inner text */
@@ -478,6 +479,11 @@ struct uid_document_t {
 	std::string                                  menuId;
 	int                                          drawOrder;
 	uid_menu_backdrop_t                          menuBackdrop;
+	/*
+	 * Added in Omaha: <definitions chrome-target="overlay">. Chrome paints in the
+	 * non-retained overlay phase so a stacked live menu keeps HUD retention.
+	 */
+	bool                                         chromeInOverlay;
 	/* Added in Omaha: optional canvas pointer="{bool expr}"; empty = no cursor ownership. */
 	std::string                                  pointerExpr;
 	uid_limits_t                                 limits;
