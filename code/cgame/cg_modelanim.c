@@ -314,7 +314,9 @@ CG_CastFootShadow
 Cast complex foot shadow using lights
 ===============
 */
-void CG_CastFootShadow(const vec_t *vLightPos, vec_t *vLightIntensity, int iTag, refEntity_t *model)
+void CG_CastFootShadow(
+    const vec_t *vLightPos, vec_t *vLightIntensity, int iTag, refEntity_t *model, footShadowTrace_t *cache
+)
 {
     int           i;
     float         fAlpha;
@@ -390,7 +392,21 @@ void CG_CastFootShadow(const vec_t *vLightPos, vec_t *vLightIntensity, int iTag,
     fLength = fPitchCos * fPitchCos * 32.0 + fPitchCos * 8.0 + 10.0;
     fOfs    = 0.5 - (-4.1 / tan(DEG2RAD(vLightAngles[0])) + 4.0 - fLength) / fLength * 0.5;
     VectorMA(vPos, -96.0, vDelta, vEnd);
-    CG_Trace(&trace, vPos, vec3_origin, vec3_origin, vEnd, 0, MASK_FOOTSHADOW, qfalse, qtrue, "CG_CastFootShadow");
+    if (cache && cache->valid && VectorCompare(cache->lightPos, vLightPos) && DistanceSquared(cache->pos, vPos) < 1.0f) {
+        // the trace from within a unit of here to this light, made earlier in
+        // this server frame (CG_EntityShadow): the same shadow
+        trace = cache->trace;
+    } else {
+        CG_Trace(
+            &trace, vPos, vec3_origin, vec3_origin, vEnd, 0, MASK_FOOTSHADOW, qfalse, qtrue, "CG_CastFootShadow"
+        );
+        if (cache) {
+            cache->valid = qtrue;
+            VectorCopy(vPos, cache->pos);
+            VectorCopy(vLightPos, cache->lightPos);
+            cache->trace = trace;
+        }
+    }
 
     if (cg_shadowdebug->integer) {
         cgi.R_DebugLine(vPos, vLightPos, 0.75, 0.75, 0.5, 1.0);
@@ -546,13 +562,14 @@ Returns the Z component of the surface being shadowed
 
 qboolean CG_EntityShadow(centity_t *cent, refEntity_t *model)
 {
-    int     iTagL, iTagR;
-    float   alpha;
-    float   fWidth;
-    vec3_t  end;
-    vec3_t  vMins, vMaxs;
-    vec3_t  vSize;
-    trace_t trace;
+    int            iTagL, iTagR;
+    float          alpha;
+    float          fWidth;
+    vec3_t         end;
+    vec3_t         vMins, vMaxs;
+    vec3_t         vSize;
+    trace_t        trace;
+    shadowTrace_t *shadowTrace;
 
     iTagR = -1;
 
@@ -572,15 +589,61 @@ qboolean CG_EntityShadow(centity_t *cent, refEntity_t *model)
         }
 
         if (iTagR != -1) {
-            int    iNumLights, iCurrLight;
-            vec3_t avLightPos[16], avLightIntensity[16];
+            int           iNumLights, iCurrLight;
+            int           snapTime;
+            vec3_t        avLightPos[16], avLightIntensity[16];
+            footShadow_t *fs;
 
+            // the lights gathered at this origin and the feet's traces to
+            // them are kept for the server frame: the same every client
+            // frame of a player who stands (the traces, within a unit)
+            fs = NULL;
+            if (cent->currentState.number >= 0 && cent->currentState.number < MAX_CLIENTS) {
+                fs = &cg.footShadows[cent->currentState.number];
+            }
+            snapTime   = cg.snap ? cg.snap->serverTime : 0;
             iNumLights = Q_clamp(cg_shadowscount->integer, 1, 8);
-            iNumLights = cgi.R_GatherLightSources(model->origin, avLightPos, avLightIntensity, iNumLights);
+            if (fs && (fs->serverTime != snapTime || fs->maxLights != iNumLights)) {
+                memset(fs, 0, sizeof(*fs));
+                fs->serverTime = snapTime;
+                fs->maxLights  = iNumLights;
+                fs->numLights  = -1;
+            }
+            if (fs && fs->numLights >= 0 && VectorCompare(fs->origin, model->origin)) {
+                iNumLights = fs->numLights;
+                for (iCurrLight = 0; iCurrLight < iNumLights; iCurrLight++) {
+                    VectorCopy(fs->lightPos[iCurrLight], avLightPos[iCurrLight]);
+                    VectorCopy(fs->lightIntensity[iCurrLight], avLightIntensity[iCurrLight]);
+                }
+            } else {
+                iNumLights = cgi.R_GatherLightSources(model->origin, avLightPos, avLightIntensity, iNumLights);
+                if (fs) {
+                    fs->numLights = iNumLights;
+                    VectorCopy(model->origin, fs->origin);
+                    for (iCurrLight = 0; iCurrLight < iNumLights; iCurrLight++) {
+                        VectorCopy(avLightPos[iCurrLight], fs->lightPos[iCurrLight]);
+                        VectorCopy(avLightIntensity[iCurrLight], fs->lightIntensity[iCurrLight]);
+                    }
+                }
+            }
             if (iNumLights) {
                 for (iCurrLight = 0; iCurrLight < iNumLights; iCurrLight++) {
-                    CG_CastFootShadow(avLightPos[iCurrLight], avLightIntensity[iCurrLight], iTagL, model);
-                    CG_CastFootShadow(avLightPos[iCurrLight], avLightIntensity[iCurrLight], iTagR, model);
+                    // the right foot's shadow takes the intensity the left
+                    // one's scaled, as before
+                    CG_CastFootShadow(
+                        avLightPos[iCurrLight],
+                        avLightIntensity[iCurrLight],
+                        iTagL,
+                        model,
+                        fs ? &fs->feet[iCurrLight][0] : NULL
+                    );
+                    CG_CastFootShadow(
+                        avLightPos[iCurrLight],
+                        avLightIntensity[iCurrLight],
+                        iTagR,
+                        model,
+                        fs ? &fs->feet[iCurrLight][1] : NULL
+                    );
                 }
 
                 // shadow was casted properly
@@ -589,11 +652,26 @@ qboolean CG_EntityShadow(centity_t *cent, refEntity_t *model)
         }
     }
 
-    // send a trace down from the player to the ground
-    VectorCopy(model->origin, end);
-    end[2] -= SHADOW_DISTANCE;
+    // send a trace down from the player to the ground; it only meets the
+    // world, so it is the same as long as the origin is
+    shadowTrace = NULL;
+    if (cent->currentState.number >= 0 && cent->currentState.number < MAX_GENTITIES) {
+        shadowTrace = &cg.shadowTraces[cent->currentState.number];
+    }
+    if (shadowTrace && shadowTrace->valid && VectorCompare(shadowTrace->origin, model->origin)) {
+        trace = shadowTrace->trace;
+    } else {
+        VectorCopy(model->origin, end);
+        end[2] -= SHADOW_DISTANCE;
 
-    cgi.CM_BoxTrace(&trace, model->origin, end, vec3_origin, vec3_origin, 0, MASK_PLAYERSOLID, qfalse);
+        cgi.CM_BoxTrace(&trace, model->origin, end, vec3_origin, vec3_origin, 0, MASK_PLAYERSOLID, qfalse);
+
+        if (shadowTrace) {
+            shadowTrace->valid = qtrue;
+            VectorCopy(model->origin, shadowTrace->origin);
+            shadowTrace->trace = trace;
+        }
+    }
 
     // no shadow if too high
     if (trace.fraction == 1.0) {

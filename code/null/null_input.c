@@ -36,8 +36,7 @@ void IN_Restart( void ) {
 void IN_Frame (void) {
 }
 
-qboolean IN_PumpLate( void ) {
-    return qfalse;
+void IN_PumpEvents( void ) {
 }
 
 void IN_Shutdown( void ) {

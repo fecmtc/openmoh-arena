@@ -49,26 +49,29 @@ source tree, or write to the Free Software Foundation, Inc.,
 
 #include "snd_openal_new.cpp"
 
-// Changed in MoH Arena: the OpenAL host here has no AVI loopback, so it offers
-// no capture and AVI recording keeps its own path.
-static qboolean S_OPENAL_Host_CaptureBegin(void)
+/*
+==============
+S_OPENAL_Host_FreeSfx
+
+Added in MoH Arena: the core frees or reloads sfx. As in stock OpenMoHAA the
+OpenAL buffer is only forgotten; set_sfx makes a new one on the next play.
+==============
+*/
+static void S_OPENAL_Host_FreeSfx(sfx_t *sfx)
 {
-    return qfalse;
+    if (sfx) {
+        sfx->buffer = 0;
+    }
 }
 
-static void S_OPENAL_Host_CaptureEnd(void) {}
+/*
+==============
+S_OPENAL_Host_PreloadSfx
 
-static void S_OPENAL_Host_CaptureFrame(int aviFps) {}
-
-static qboolean S_OPENAL_Host_CaptureActive(void)
-{
-    return qfalse;
-}
-
-static int S_OPENAL_Host_CaptureSampleRate(void)
-{
-    return 0;
-}
+Added in MoH Arena: OpenAL makes a sound's buffer on its first play, as in stock.
+==============
+*/
+static void S_OPENAL_Host_PreloadSfx(sfx_t *sfx) {}
 
 extern "C" const sndHost_t s_sndHostOpenAL = {
     "openal",
@@ -86,6 +89,8 @@ extern "C" const sndHost_t s_sndHostOpenAL = {
     S_OPENAL_GetMusicFilename,
     S_OPENAL_GetMusicLoopCount,
     S_OPENAL_GetMusicOffset,
+    S_OPENAL_Host_FreeSfx,
+    S_OPENAL_Host_PreloadSfx,
 
     MUSIC_NewSoundtrack,
     MUSIC_UpdateMood,
@@ -105,10 +110,4 @@ extern "C" const sndHost_t s_sndHostOpenAL = {
     S_NeedFullRestart,
     S_PrintInfo,
     S_DumpInfo,
-
-    S_OPENAL_Host_CaptureBegin,
-    S_OPENAL_Host_CaptureEnd,
-    S_OPENAL_Host_CaptureFrame,
-    S_OPENAL_Host_CaptureActive,
-    S_OPENAL_Host_CaptureSampleRate,
 };

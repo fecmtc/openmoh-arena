@@ -2486,76 +2486,70 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 
 /*
 =================
-RE_SavePNG
+RE_SavePNGFromRGB
 
-Added in Omaha: write RGBA8 rows to a PNG file (model bake / UI export).
+Bottom-up RGB (+ line padding), same buffer JPEG screenshots use.
 =================
 */
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "../../thirdparty/stb/stb_image_write.h"
+#include "../thirdparty/stb/stb_image_write.h"
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
-void RE_SavePNG(const char *filename, int width, int height, const byte *rgba)
+/*
+=================
+RE_EncodePNGFromRGB
+
+RE_SavePNGFromRGB's file in memory (malloc'd: free it with free), for a
+thread that writes it itself; *length its size. NULL on failure
+=================
+*/
+byte *RE_EncodePNGFromRGB(int width, int height, const byte *rgb, int padding, int *length)
 {
-	unsigned char *pngData = NULL;
-	int            pngLen = 0;
+	unsigned char *pngData;
 
-	if (!filename || !filename[0] || width <= 0 || height <= 0 || !rgba) {
+	*length = 0;
+	if (width <= 0 || height <= 0 || !rgb) {
+		return NULL;
+	}
+	stbi_flip_vertically_on_write(1);
+	pngData = stbi_write_png_to_mem((const unsigned char *)rgb, width * 3 + padding, width, height, 3, length);
+	stbi_flip_vertically_on_write(0);
+	if (pngData && *length <= 0) {
+		STBIW_FREE(pngData);
+		pngData = NULL;
+	}
+	return pngData;
+}
+
+void RE_SavePNGFromRGB(const char *filename, int width, int height, const byte *rgb, int padding)
+{
+	unsigned char *pngData;
+	int pngLen = 0;
+	int stride;
+
+	if (!filename || !filename[0] || width <= 0 || height <= 0 || !rgb) {
 		return;
 	}
 
-	pngData = stbi_write_png_to_mem((const unsigned char *)rgba, width * 4, width, height, 4, &pngLen);
+	stride = width * 3 + padding;
+	stbi_flip_vertically_on_write(1);
+	pngData = stbi_write_png_to_mem((const unsigned char *)rgb, stride, width, height, 3, &pngLen);
+	stbi_flip_vertically_on_write(0);
 	if (!pngData || pngLen <= 0) {
-		ri.Printf(PRINT_WARNING, "RE_SavePNG: encode failed for '%s'\n", filename);
+		ri.Printf(PRINT_WARNING, "RE_SavePNGFromRGB: encode failed for '%s'\n", filename);
 		if (pngData) {
 			STBIW_FREE(pngData);
 		}
 		return;
 	}
 
-	ri.FS_WriteFile(filename, pngData, (int)pngLen);
+	ri.FS_WriteFile(filename, pngData, pngLen);
 	STBIW_FREE(pngData);
-}
-
-/*
-=================
-RE_SavePNGFromRGB
-
-Added in Omaha: convert OpenGL bottom-up RGB (+ padding) to top-down RGBA and write PNG.
-=================
-*/
-void RE_SavePNGFromRGB(const char *filename, int width, int height, const byte *rgb, int padding)
-{
-	byte *rgba;
-	int   x, y;
-	int   srcStride;
-	int   dstStride;
-
-	if (!filename || !filename[0] || width <= 0 || height <= 0 || !rgb) {
-		return;
-	}
-
-	srcStride = width * 3 + padding;
-	dstStride = width * 4;
-	rgba = ri.Hunk_AllocateTempMemory(dstStride * height);
-	if (!rgba) {
-		return;
-	}
-
-	for (y = 0; y < height; y++) {
-		const byte *src = rgb + (height - 1 - y) * srcStride;
-		byte       *dst = rgba + y * dstStride;
-
-		for (x = 0; x < width; x++) {
-			dst[0] = src[0];
-			dst[1] = src[1];
-			dst[2] = src[2];
-			dst[3] = 255;
-			src += 3;
-			dst += 4;
-		}
-	}
-
-	RE_SavePNG(filename, width, height, rgba);
-	ri.Hunk_FreeTempMemory(rgba);
 }

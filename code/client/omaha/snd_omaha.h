@@ -21,8 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 /*
- * Changed in Omaha: forked from snd_openal_new.h as the Omaha sound-host state.
- * Only snd_omaha.cpp includes this; the core reaches the host via snd_host.h.
+ * Changed in Omaha: forked from the previous sound-host header. Only snd_omaha.cpp includes this.
  */
 
 #pragma once
@@ -66,7 +65,6 @@ typedef struct {
 
     int      iStartTime;
     qboolean bInUse;
-    qboolean bCombine;
 
     float fBaseVolume;
     float fMinDist;
@@ -98,28 +96,43 @@ struct omaha_channel {
     int    fade_time;
     int    fade_start_time;
 
-    byte *bufferdata;
-
-    /* Added in Omaha: renderer voice / buffer ids. */
-    sndVoiceId_t  voiceId;
-    sndBufferId_t bufferId;
-    int           voiceKind; /* 0=3D, 1=2D, 2=2DStream */
+    /* Added in Omaha: renderer voice / sound ids. */
+    omVoiceId_t voiceId;
+    omSoundId_t bufferId;
+    int         voiceKind; /* 0=3D, 1=2D, 2=2DStream */
 
     /* Added in Omaha: Miles-style loop block (sample frames; end < 0 = EOF). */
     int loopBlockStart;
     int loopBlockEnd;
 
-    /* Added in Omaha: omaha-mixer obstruction state. */
+    /* Added in Omaha: omaha-mixer obstruction and portal-occlusion state. */
     int   iNextObstructionCheck;
     float fObstruction;
+    float fOcclusion;
 
     /* Added in Omaha: resolved sndCategory_t of the last 3D start (overlap ducking). */
     int iCategory;
 
-    /* Added in Omaha: last SND_PARAM_SPATIAL_ROUTE sent to the renderer (-1 = never). */
+    /* Added in Omaha: last route sent (bus / direct / dry). */
     int iSpatialRoute;
 
+    /* Added in Omaha: params last handed to the mixer, so an unchanged frame skips it. */
+    omVoiceParams_t cur;
+    omVoiceParams_t sent;
+    qboolean        sentOk;
+
+    /* Added in Omaha: set_sample_offset before play() lands here; play() starts from it. */
+    unsigned int startOffset;
+
+    /* Added in Omaha: last obstruction trace endpoints (bitwise) and time. */
+    vec3_t vTraceListener;
+    vec3_t vTraceOrigin;
+    int    iTraceTime;
+    qboolean bTraceValid;
+
 public:
+    virtual ~omaha_channel() {}
+
     void         play();
     virtual void stop();
     void         pause();
@@ -129,6 +142,7 @@ public:
     void  set_no_virtualization();
     void  set_virtualization();
 
+    void flush_params();
     void set_gain(float gain);
     void set_velocity(float v0, float v1, float v2);
     void set_position(float v0, float v1, float v2);
@@ -180,6 +194,8 @@ private:
     struct sndAsyncStream_s *asyncJob; // Added in Omaha: decode-ahead worker owns streamHandle while set
 
 public:
+    bool songEnded; // Added in Omaha: the last loop played out; the music system takes and clears it
+
     omaha_channel_two_d_stream();
     ~omaha_channel_two_d_stream();
 
@@ -197,17 +213,14 @@ protected:
 
 private:
     void clear_stream();
-    void queueChunk(const void *data, unsigned int size, const void *streamHandle); // Added in Omaha
+    bool queueChunk(const void *data, unsigned int size, const void *streamHandle); // Added in Omaha
+    int  fetchChunk(char *rawData, unsigned int cap);                               // Added in Omaha
     void attachAsync();            // Added in Omaha
-    unsigned int detachAsync();    // Added in Omaha
+    void close_stream();           // Changed: the codec stream closed, through the worker when it has it
 
     unsigned int getQueueLength() const;
     unsigned int getCurrentStreamPosition() const;
     unsigned int getBitsPerSample() const;
-};
-
-struct omaha_movie_channel : public omaha_channel {
-
 };
 
 struct omaha_internal_t {

@@ -245,8 +245,7 @@ int		NET_StringToAdr ( const char *s, netadr_t *a, netadrtype_t family);
 qboolean	NET_GetLoopPacket (netsrc_t sock, netadr_t *net_from, msg_t *net_message);
 void		NET_JoinMulticast6(void);
 void		NET_LeaveMulticast6(void);
-void		NET_Sleep(int msec);
-void		NET_SleepUs(int64_t usec); // Added in Omaha
+void		NET_SleepUs(int64_t usec);
 
 
 #define	MAX_MSGLEN				49152		// max length of a message, which may
@@ -749,7 +748,7 @@ qboolean FS_Initialized( void );
 
 void	FS_InitFilesystem( void );
 void	FS_Shutdown( qboolean closemfp );
-// Added in Omaha: called before FS_Shutdown closes handles (client stream worker)
+// Optional callback before FS_Shutdown closes handles (async stream worker).
 extern void ( *fs_shutdownHook )( void );
 
 qboolean	FS_ConditionalRestart( int checksumFeed, qboolean disconnect );
@@ -1029,6 +1028,12 @@ int QDECL	Com_strCompare( const void *a, const void *b );
 
 
 extern	float currentfps;
+// the frame limiter's present gate: the frame being built, as a token for
+// the renderer (its number), the hold before that frame's present and the
+// present itself (any thread; see Com_PresentGate in common.c)
+uint64_t Com_FrameToken( void );
+void	Com_PresentGate( uint64_t token );
+void	Com_PresentMark( uint64_t token );
 extern	cvar_t	*paused;
 extern	cvar_t	*config;
 extern	cvar_t	*fps;
@@ -1082,8 +1087,6 @@ extern	cvar_t* com_target_version;
 extern	cvar_t* com_target_extension;
 extern	cvar_t* com_target_demo;
 
-extern	cvar_t* com_updatecheck_enabled;
-extern	cvar_t* com_updatecheck_interval;
 
 extern	int		protocol_version_demo;
 extern	int		protocol_version_full;
@@ -1095,6 +1098,9 @@ extern	int		time_backend;		// renderer backend time
 
 extern	int		com_frameTime;
 extern	int		com_frameMsec;
+
+void		Com_LatchRenderFraction( void );
+float		Com_RenderTimeFraction( void );
 
 extern	qboolean	com_errorEntered;
 extern	qboolean	com_fullyInitialized;
@@ -1182,8 +1188,6 @@ const char* Z_NumberStringPointer(int iNum);
 // commandLine should not include the executable name (argv[0])
 void Com_Init( char *commandLine );
 void Com_Frame( void );
-void Com_PresentGuard( void ); // Added in Omaha
-void Com_DispatchInputEvents( void ); // Added in Omaha: late input only (no net)
 void Com_Shutdown( void );
 
 qboolean Com_SanitizeName( const char *pszOldName, char *pszNewName, size_t bufferSize );
@@ -1215,6 +1219,7 @@ void CL_Disconnect();
 void CL_AbnormalDisconnect();
 void CL_Shutdown(const char *finalmsg, qboolean disconnect, qboolean quit);
 qboolean CL_FinishedIntro(void);
+qboolean CL_CommandPerFrame(void);	// cl_movefps 0: frames of 1 ms or more (Com_Frame)
 void CL_FinishedStartStage(void);
 void CL_SetFrameNumber(int frameNumber);
 void CL_Frame( int msec );
@@ -1303,7 +1308,7 @@ int SV_SendQueuedPackets(void);
 //
 void IN_Init(void *windowData);
 void IN_Frame(void);
-qboolean IN_PumpLate(void); // Added in Omaha: SDL poll only, for late mouse; qtrue if polled
+void IN_PumpEvents(void);
 void IN_Shutdown(void);
 void IN_Restart(void);
 void IN_GetMousePosition(int *x, int *y);
@@ -1362,7 +1367,6 @@ sysEvent_t	Sys_GetEvent(void);
 
 void		Com_QueueEvent( int time, sysEventType_t type, int value, int value2, size_t ptrLength, void *ptr );
 int			Com_EventLoop( void );
-void		Com_PushEvent( sysEvent_t *event );
 sysEvent_t	Com_GetSystemEvent( void );
 
 void	Sys_Init (void);
@@ -1398,6 +1402,13 @@ void	Sys_Print( const char *msg );
 // Sys_Milliseconds should only be used for profiling purposes,
 // any game related timing information should come from event timestamps
 int		Sys_Milliseconds (void);
+// a monotonic clock in microseconds (the fps counter) and in nanoseconds
+// (the frame limiter's deadlines)
+int64_t	Sys_Microseconds (void);
+int64_t	Sys_Nanoseconds (void);
+// sleeps for about ns nanoseconds, as closely as the platform's timers can
+// (the frame limiter's wait on Windows, Com_FrameWait)
+void	Sys_SleepNs (int64_t ns);
 
 qboolean Sys_RandomBytes( byte *string, int len );
 
@@ -1447,7 +1458,6 @@ char	*Sys_DefaultOutputPath( void );
 char **Sys_ListFiles( const char *directory, const char *extension, const char *filter, int *numfiles, qboolean wantsubs );
 void	Sys_FreeFileList( char **list );
 void	Sys_Sleep(int msec);
-int64_t	Sys_Microseconds(void);
 
 void Sys_InitStreamThread(void);
 void Sys_ShutdownStreamThread(void);
@@ -1503,7 +1513,6 @@ qboolean Sys_OpenFolderInFileManager( const char *path, qboolean create );
 void Sys_RemovePIDFile( const char *gamedir );
 void Sys_InitPIDFile( const char *gamedir );
 
-void Sys_ProcessBackgroundTasks();
 
 /* This is based on the Adaptive Huffman algorithm described in Sayood's Data
  * Compression book.  The ranks are not actually stored, but implicitly defined

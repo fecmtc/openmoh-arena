@@ -13,21 +13,28 @@ project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES C CXX)
 
 option(BUILD_SERVER "Build dedicated server" ON)
 option(BUILD_CLIENT "Build client" ON)
-option(BUILD_RENDERER_GL1 "Build GL1 renderer" ON)
-option(BUILD_RENDERER_GL2 "Build GL2 renderer" OFF)
+option(BUILD_RENDERER_VULKAN "Build the Vulkan renderer" ON)
 option(BUILD_GAME_LIBRARIES "Build game module libraries" ON)
-option(BUILD_GAME_QVMS "Build game module qvms" ON)
 option(BUILD_STANDALONE "Build binaries for standalone games" OFF)
 
-option(USE_RENDERER_DLOPEN "Dynamically load the renderer(s)" ON)
+# Changed in MoH Arena: the renderer is linked into the client by default.
+#  ON builds renderer_vulkan as a library loaded at run time (cl_renderer),
+#  which the renderer's own tools (code/renderervk/tools) need.
+option(USE_RENDERER_DLOPEN "Load the renderer as a library at run time" OFF)
+if(BUILD_CLIENT AND NOT USE_RENDERER_DLOPEN AND NOT BUILD_RENDERER_VULKAN)
+    message(FATAL_ERROR "The client needs a renderer: BUILD_RENDERER_VULKAN, or USE_RENDERER_DLOPEN with a renderer built elsewhere")
+endif()
+
+# Changed in MoH Arena: OpenAL is the default sound host (s_backend openal)
 option(USE_OPENAL "OpenAL audio" ON)
 option(USE_OPENAL_DLOPEN "Dynamically load OpenAL" ON)
-option(USE_HTTP "HTTP download support" ON)
+
 option(USE_CODEC_VORBIS "Ogg Vorbis support" ON)
 option(USE_CODEC_OPUS "Ogg Opus support" ON)
 option(USE_CODEC_MAD "MP3 support" ON)
 option(USE_VOIP "Voice chat" OFF)
 option(USE_MUMBLE "Mumble support" OFF)
+option(USE_DISCORD "Discord Rich Presence" ON)
 option(USE_FREETYPE "Freetype font rendering" OFF)
 
 option(USE_INTERNAL_LIBS "Use internally packaged libraries" ON)
@@ -41,6 +48,11 @@ option(USE_INTERNAL_MAD "Use internal copy of libmad" ${USE_INTERNAL_LIBS})
 
 # Added in MoH Arena
 option(MOHARENA "Build the MoH Arena native bridge" OFF)
+# Added in MoH Arena: the modern UI. Off on this branch: the original UI only.
+option(MOHARENA_MODERN_UI "Build the modern UI" OFF)
+if(MOHARENA_MODERN_UI)
+    message(WARNING "MOHARENA_MODERN_UI: the modern UI draws through the GL renderer's UI calls, which the Vulkan renderer doesn't have")
+endif()
 
 # Release build by default, set externally if you want something else
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -67,11 +79,8 @@ set(SOURCE_DIR ${CMAKE_SOURCE_DIR}/code)
 include(CTest)
 
 # Changed in MoH Arena: the test programs of the modern UI are built only when
-# asked for, so a plain build has the same targets as before.
+# asked for (cmake/tests/all.cmake), so a plain build has the same targets as before.
 option(MOHARENA_UI_TESTS "Build the test programs of the modern UI" OFF)
-if(BUILD_TESTING AND MOHARENA_UI_TESTS)
-  include(tests/all)
-endif()
 
 if(DEFINED ENV{SOURCE_DATE_EPOCH})
     string(TIMESTAMP PRODUCT_DATE "%b %d %Y" UTC)
@@ -86,12 +95,14 @@ include(deploy/all)
 include(version)
 
 include(server)
-include(renderer_gl1)
-include(renderer_gl2)
+include(renderer_vulkan)
 include(client)
 include(basegame)
-#include(missionpack)
 include(launcher)
 
 include(post_configure)
-#include(installer)
+
+# Unit tests (CTest's BUILD_TESTING, on by default)
+if(BUILD_TESTING)
+    include(tests/all)
+endif()

@@ -15,7 +15,6 @@ set(CLIENT_SOURCES
     ${SOURCE_DIR}/client/cl_cgame.cpp
     ${SOURCE_DIR}/client/cl_cin.cpp
     ${SOURCE_DIR}/client/cl_consolecmds.cpp
-    ${SOURCE_DIR}/client/cl_curl.c
     ${SOURCE_DIR}/client/cl_input.cpp
     ${SOURCE_DIR}/client/cl_instantAction.cpp
     ${SOURCE_DIR}/client/cl_inv.cpp
@@ -39,25 +38,11 @@ set(CLIENT_SOURCES
     ${SOURCE_DIR}/client/cl_uimpmappicker.cpp
     ${SOURCE_DIR}/client/cl_uiplayermodelpicker.cpp
     ${SOURCE_DIR}/client/cl_uiradar.cpp
-    ${SOURCE_DIR}/client/cl_uirender.cpp
-    ${SOURCE_DIR}/client/cl_uivars.cpp
-    ${SOURCE_DIR}/client/cl_uiperf.cpp
-    ${SOURCE_DIR}/client/cl_uimenu_dispatcher.cpp
-    ${SOURCE_DIR}/client/cl_hud_registry.cpp
-    ${SOURCE_DIR}/client/cl_hud_host.cpp
-    ${SOURCE_DIR}/client/cl_objectives_host.cpp
-    ${SOURCE_DIR}/client/cl_messages_host.cpp
-    ${SOURCE_DIR}/client/cl_killfeed_classify.cpp
-    ${SOURCE_DIR}/client/cl_killfeed.cpp
-    ${SOURCE_DIR}/client/cl_modern_browser.cpp
-    ${SOURCE_DIR}/client/cl_fpsbench.cpp
-    ${SOURCE_DIR}/client/cl_scoreboard_host.cpp
     ${SOURCE_DIR}/client/cl_uiserverlist.cpp
     ${SOURCE_DIR}/client/cl_uisoundpicker.cpp
     ${SOURCE_DIR}/client/cl_uistd.cpp
     ${SOURCE_DIR}/client/cl_uiview3d.cpp
     ${SOURCE_DIR}/client/libmumblelink.c
-    ${SOURCE_DIR}/client/qal.c
     ${SOURCE_DIR}/client/snd_codec_mp3.c
     ${SOURCE_DIR}/client/snd_codec_ogg.c
     ${SOURCE_DIR}/client/snd_codec_opus.c
@@ -69,23 +54,36 @@ set(CLIENT_SOURCES
     ${SOURCE_DIR}/client/snd_miles_new.cpp
     ${SOURCE_DIR}/client/snd_host.cpp
     ${SOURCE_DIR}/client/snd_host_openal.cpp
-)
-if(USE_OMAHA_SOUND)
-    list(APPEND CLIENT_SOURCES
-        ${SOURCE_DIR}/client/omaha/snd_category.c
-        ${SOURCE_DIR}/client/omaha/snd_hrtf_omaha.cpp
-        ${SOURCE_DIR}/client/omaha/snd_omaha.cpp
-        ${SOURCE_DIR}/client/omaha/snd_omaha_overlay.cpp
-        ${SOURCE_DIR}/client/omaha/snd_render_omaha.cpp
-        ${SOURCE_DIR}/client/omaha/snd_render_select.cpp
-        ${SOURCE_DIR}/client/omaha/snd_stream_async.cpp
-    )
-endif()
-list(APPEND CLIENT_SOURCES
+    ${SOURCE_DIR}/client/qal.c
+    ${SOURCE_DIR}/client/omaha/snd_adpcm_omaha.c
+    ${SOURCE_DIR}/client/omaha/snd_category.c
+    ${SOURCE_DIR}/client/omaha/snd_hrtf_omaha.cpp
+    ${SOURCE_DIR}/client/omaha/snd_omaha.cpp
+    ${SOURCE_DIR}/client/omaha/snd_omaha_overlay.cpp
+    ${SOURCE_DIR}/client/omaha/snd_render_omaha.cpp
+    ${SOURCE_DIR}/client/omaha/snd_render_select.cpp
+    ${SOURCE_DIR}/client/omaha/snd_stream_async.cpp
+    ${SOURCE_DIR}/client/snd_stream_memory.cpp
     ${SOURCE_DIR}/client/usignal.cpp
     ${SOURCE_DIR}/sdl/sdl_input.c
     ${SOURCE_DIR}/sdl/sdl_mouse.c
     ${CLIENT_PLATFORM_SOURCES}
+)
+
+# Added in MoH Arena: the client side of the modern UI
+set(MODERN_UI_CLIENT_SOURCES
+    ${SOURCE_DIR}/client/cl_uirender.cpp
+    ${SOURCE_DIR}/client/cl_uivars.cpp
+    ${SOURCE_DIR}/client/cl_uiperf.cpp
+    ${SOURCE_DIR}/client/cl_uimenu_dispatcher.cpp
+    ${SOURCE_DIR}/client/cl_hud_registry.cpp
+    ${SOURCE_DIR}/client/cl_hud_host.cpp
+    ${SOURCE_DIR}/client/cl_objectives_host.cpp
+    ${SOURCE_DIR}/client/cl_messages_host.cpp
+    ${SOURCE_DIR}/client/cl_killfeed_classify.cpp
+    ${SOURCE_DIR}/client/cl_killfeed.cpp
+    ${SOURCE_DIR}/client/cl_modern_browser.cpp
+    ${SOURCE_DIR}/client/cl_scoreboard_host.cpp
 )
 
 set(UIRENDER_SOURCES
@@ -170,19 +168,16 @@ add_git_dependency(${SOURCE_DIR}/client/cl_console.c)
 
 set(CLIENT_BINARY ${CLIENT_NAME})
 
-list(APPEND CLIENT_DEFINITIONS BOTLIB)
 list(APPEND CLIENT_DEFINITIONS APP_MODULE)
 
 if(BUILD_STANDALONE)
     list(APPEND CLIENT_DEFINITIONS STANDALONE)
 endif()
 
+# Changed in MoH Arena: with USE_RENDERER_DLOPEN the renderer is loaded at run
+#  time (renderer_<cl_renderer>); otherwise it is linked in, below.
 if(USE_RENDERER_DLOPEN)
     list(APPEND CLIENT_DEFINITIONS USE_RENDERER_DLOPEN)
-endif()
-
-if(USE_HTTP)
-    list(APPEND CLIENT_DEFINITIONS USE_HTTP)
 endif()
 
 if(USE_VOIP)
@@ -194,17 +189,32 @@ if(USE_MUMBLE)
     list(APPEND CLIENT_LIBRARY_SOURCES ${SOURCE_DIR}/client/libmumblelink.c)
 endif()
 
+if(USE_DISCORD)
+    list(APPEND CLIENT_DEFINITIONS USE_DISCORD)
+    list(APPEND CLIENT_LIBRARY_SOURCES ${SOURCE_DIR}/client/cl_discord.c)
+endif()
+
+# Added in MoH Arena: the modern UI is built only with MOHARENA_MODERN_UI.
+#  Without it, cl_modern_ui_off.cpp stands in for its entry points and the
+#  original UI is the only one (ui_legacy is held to 1).
+if(MOHARENA_MODERN_UI)
+    list(APPEND CLIENT_SOURCES
+        ${MODERN_UI_CLIENT_SOURCES}
+        ${UIRENDER_SOURCES}
+        ${UIDESIGN_SOURCES}
+    )
+else()
+    list(APPEND CLIENT_SOURCES ${SOURCE_DIR}/client/cl_modern_ui_off.cpp)
+    list(APPEND CLIENT_DEFINITIONS MOHARENA_NO_MODERN_UI)
+endif()
+
 list(APPEND CLIENT_BINARY_SOURCES
     ${SERVER_SOURCES}
     ${CLIENT_SOURCES}
-    ${UIRENDER_SOURCES}
-    ${UIDESIGN_SOURCES}
     ${UI_SOURCES}
     ${COMMON_SOURCES}
     ${SCRIPT_SYSTEM_SOURCES}
-    ${BOTLIB_SOURCES}
     ${SYSTEM_SOURCES}
-    ${ASM_SOURCES}
     ${CLIENT_LIBRARY_SOURCES})
 
 add_executable(${CLIENT_BINARY} ${CLIENT_EXECUTABLE_OPTIONS} ${CLIENT_BINARY_SOURCES})
@@ -221,22 +231,40 @@ target_link_options(            ${CLIENT_BINARY} PRIVATE ${CLIENT_LINK_OPTIONS})
 
 set_output_dirs(${CLIENT_BINARY})
 
+# Added in MoH Arena: the Vulkan renderer linked into the client
 if(NOT USE_RENDERER_DLOPEN)
-    target_sources(${CLIENT_BINARY} PRIVATE
-        # These are never simultaneously populated
-        ${RENDERER_GL1_BINARY_SOURCES}
-        ${RENDERER_GL2_BINARY_SOURCES})
-
+    target_sources(             ${CLIENT_BINARY} PRIVATE ${RENDERER_VULKAN_BINARY_SOURCES})
     target_include_directories( ${CLIENT_BINARY} PRIVATE ${RENDERER_INCLUDE_DIRS})
-    target_compile_definitions( ${CLIENT_BINARY} PRIVATE ${RENDERER_DEFINITIONS})
+    target_compile_definitions( ${CLIENT_BINARY} PRIVATE ${RENDERER_DEFINITIONS} USE_VULKAN)
     target_compile_options(     ${CLIENT_BINARY} PRIVATE ${RENDERER_COMPILE_OPTIONS})
-    target_link_libraries(      ${CLIENT_BINARY} PRIVATE ${RENDERER_LIBRARIES})
+    target_link_libraries(      ${CLIENT_BINARY} PRIVATE ${RENDERER_LIBRARIES} Vulkan::Headers)
 endif()
+
+# Ship the headphone HRTF set next to the client binary (fs_basepath / main).
+# OMAHA-SOUND-LICENSES.txt is the binary-form notice required by libmysofa,
+# the Speex resampler, kdtree, and PFFFT. The SADIE Apache text goes with the data.
+add_custom_command(TARGET ${CLIENT_BINARY} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        $<TARGET_FILE_DIR:${CLIENT_BINARY}>/main/sound/prom
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/assets/main/sound
+        $<TARGET_FILE_DIR:${CLIENT_BINARY}>/main/sound
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_SOURCE_DIR}/code/thirdparty/OMAHA-SOUND-LICENSES.txt
+        $<TARGET_FILE_DIR:${CLIENT_BINARY}>/OMAHA-SOUND-LICENSES.txt
+    COMMENT "Copy sound assets and license notices"
+)
+
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/main/sound
+    DESTINATION ${INSTALL_BINDIR_FULL}/main)
+install(FILES ${CMAKE_SOURCE_DIR}/code/thirdparty/OMAHA-SOUND-LICENSES.txt
+    DESTINATION ${INSTALL_BINDIR_FULL})
 
 # Added in MoH Arena
 if(MOHARENA)
     target_compile_definitions(${CLIENT_BINARY} PRIVATE MOHARENA_NATIVE_BRIDGE)
-    if(BUILD_RENDERER_GL1 AND NOT USE_RENDERER_DLOPEN)
+    # the draw API is in the Vulkan renderer, which the client then links in
+    if(BUILD_RENDERER_VULKAN AND NOT USE_RENDERER_DLOPEN)
         target_compile_definitions(${CLIENT_BINARY} PRIVATE MOHARENA_RENDER_API)
     endif()
     if(WIN32)

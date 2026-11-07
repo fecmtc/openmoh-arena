@@ -99,7 +99,7 @@ static void Om_DrawMeterBar(
 
 static void Om_DrawHfDuckMeter(void)
 {
-	static fontheader_t *s_meterFont;
+	fontheader_t        *meterFont;
 	const float          meterH     = 500.0f;
 	const float          meterW     = 18.0f;
 	const float          margin     = 12.0f;
@@ -122,9 +122,8 @@ static void Om_DrawHfDuckMeter(void)
 		return;
 	}
 
-	if (!s_meterFont) {
-		s_meterFont = re.LoadFont("verdana-14");
-	}
+	/* Fixed in Omaha: look up each frame; a cached pointer dangles across vid_restart. LoadFont is a name lookup once loaded. */
+	meterFont = re.LoadFont("verdana-14");
 
 	gainDb   = S_Omaha_HfDuckGainDb();
 	maxCut   = S_Omaha_HfDuckMaxCutDb();
@@ -152,7 +151,7 @@ static void Om_DrawHfDuckMeter(void)
 	scFill[3] = 0.9f;
 	Com_sprintf(topSc, sizeof(topSc), "0 dB");
 	Com_sprintf(botSc, sizeof(botSc), "-60");
-	Om_DrawMeterBar(s_meterFont, leftX, y, meterW, meterH, scT, scFill, "HF SC", topSc, botSc);
+	Om_DrawMeterBar(meterFont, leftX, y, meterW, meterH, scT, scFill, "HF SC", topSc, botSc);
 
 	threshY = y + meterH - threshT * meterH;
 	threshCol[0] = 1.0f;
@@ -161,14 +160,14 @@ static void Om_DrawHfDuckMeter(void)
 	threshCol[3] = 1.0f;
 	Om_MeterFillBox(leftX - 4.0f, threshY, meterW + 8.0f, 2.0f, threshCol);
 	Com_sprintf(thrLab, sizeof(thrLab), "thr %.0f", threshDb);
-	Om_MeterLabel(s_meterFont, leftX + meterW + 6.0f, threshY - 7.0f, thrLab, threshCol);
+	Om_MeterLabel(meterFont, leftX + meterW + 6.0f, threshY - 7.0f, thrLab, threshCol);
 
 	liveCol[0] = 0.7f;
 	liveCol[1] = 0.9f;
 	liveCol[2] = 1.0f;
 	liveCol[3] = 1.0f;
 	Com_sprintf(liveLab, sizeof(liveLab), "%.1f dB", scDb);
-	Om_MeterLabel(s_meterFont, leftX, y + meterH + 4.0f, liveLab, liveCol);
+	Om_MeterLabel(meterFont, leftX, y + meterH + 4.0f, liveLab, liveCol);
 
 	if (maxCut < 0.05f) {
 		duckT = 0.0f;
@@ -186,9 +185,9 @@ static void Om_DrawHfDuckMeter(void)
 	duckFill[3] = 0.9f;
 	Com_sprintf(topDuck, sizeof(topDuck), "-%.1f dB", maxCut);
 	Com_sprintf(botDuck, sizeof(botDuck), "0");
-	Om_DrawMeterBar(s_meterFont, rightX, y, meterW, meterH, duckT, duckFill, "SHELF", topDuck, botDuck);
+	Om_DrawMeterBar(meterFont, rightX, y, meterW, meterH, duckT, duckFill, "SHELF", topDuck, botDuck);
 	Com_sprintf(liveLab, sizeof(liveLab), "%.2f dB", gainDb);
-	Om_MeterLabel(s_meterFont, rightX - 8.0f, y + meterH + 4.0f, liveLab, duckFill);
+	Om_MeterLabel(meterFont, rightX - 8.0f, y + meterH + 4.0f, liveLab, duckFill);
 
 	re.SetColor(NULL);
 }

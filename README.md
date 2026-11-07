@@ -1,281 +1,78 @@
-# OpenMoH Arena
+# OpenMoH Arena Reloaded
 
-**OpenMoH Arena** is a competitive-focused MOHAA engine and client based on [OpenMoHAA](https://github.com/openmoh/openmohaa).
+This is the `mohaa-reloaded` branch of [OpenMoH Arena](https://github.com/fecmtc/openmoh-arena): the OpenMoH Arena client built on [MoHAA-Reloaded](https://github.com/fortemoh/MoHAA-Reloaded) by pstngh, a fork of [OpenMoHAA](https://github.com/openmoh/openmohaa) with a native Vulkan renderer. It is developed for use with [MoHArena](https://moharena.com/).
 
-It is being developed for competitive Medal of Honor: Allied Assault play and for integration with [MoHArena](https://moharena.com/).
+OpenMoH Arena's `main` branch stays on OpenMoHAA's renderers. This branch is a second build of the same client, released next to it with tags named `vX.Y.Z-reloaded`.
 
-> OpenMoH Arena is an independent derivative project. It is not an official OpenMoHAA release and is not affiliated with or endorsed by the OpenMoHAA project or Electronic Arts.
+> OpenMoH Arena is an independent derivative project. It is not affiliated with or endorsed by the OpenMoHAA project, MoHAA-Reloaded, Project: Omaha or Electronic Arts.
 
-## Purpose
+## What this branch is
 
-OpenMoH Arena focuses on the needs of competitive MOHAA players, match administrators, tournament organizers, spectators, and developers.
+* MoHAA-Reloaded's `vulkan` branch, merged with OpenMoH Arena's `main`.
+* The Vulkan renderer is linked into the game, so the SHA-256 that MoH Arena Guard checks covers it. OpenMoHAA's GL renderers are not built.
+* The MoH Arena Guard module and its F7 pages, drawn through `code/renderervk/tr_moharena.c`.
+* The gameplay work of `main`: the first-person spectator view, kill colours, personal mute, the sniper scopes, the terrain collision of grenades, the weapon commands.
+* MoHAA-Reloaded's movement, input timing and defaults (`com_maxfps 125`, `cl_maxpackets 125`, `cl_movefps 100`, `cl_movesubgrid 1`, `r_uselod 0`). `cl_nullbinds` is allowed and off by default.
+* The original UI only: the optional modern UI of `main` is not built (`ui_legacy` is held to 1).
+* The stock image crosshair (`cg_crosshair`), not MoHAA-Reloaded's drawn one.
+* No MoHAA-Reloaded launcher: MoH Arena Guard starts the game. `launcher/desktop` is neither built nor shipped.
 
-Areas of development may include:
-
-* competitive multiplayer improvements
-* match administration
-* tournament-oriented functionality
-* spectator improvements
-* competitive quality-of-life features
-* improved diagnostics
-* networking and stability improvements
-* security and integrity improvements
-* integration with MoHArena services
-* improvements inherited from OpenMoHAA
-
-The intention is to remain reasonably close to OpenMoHAA while introducing functionality specifically useful for organized competitive play.
-
-## Project status
-
-OpenMoH Arena is under active development.
-
-This repository contains **publicly released source code**.
-
-Development may occur privately between public source releases, so this repository may not always reflect the latest development version.
-
-Public releases represent selected source snapshots that are considered suitable for publication.
-
-## Source releases
-
-Versions published in this repository are tagged using semantic-style version numbers such as:
-
-```text
-v0.1.0
-v0.2.0
-v1.0.0
-```
-
-The Git tag for a release identifies the corresponding public source version.
-
-## Binaries
-
-Each release on the
-[Releases page](https://github.com/fecmtc/openmoh-arena/releases) comes with
-Windows builds for x64 (64-bit Windows) and x86 (32-bit Windows).
-
-Each zip holds the game's executables and libraries, the pack of the
-[optional modern UI](#optional-modern-ui) (`main/zz_moharena_ui.pk3`), the
-headphone set of the [Omaha sound mixer](#sound) (`main/sound/prom/hrtf`),
-`COPYING.txt`, `SOURCE-OFFER.txt`, `THIRD-PARTY.txt`,
-`OMAHA-SOUND-LICENSES.txt` and `SHA256SUMS.txt`. The release notes name the
-commit the builds were made from.
-
-These are the builds that [MoH Arena Guard](https://moharena.com/anti-cheat)
-accepts.
-Guard checks the SHA-256 of `openmohaa.exe`, so it does not start a build made
-anywhere else, even from the same source.
-
-Builds for Linux and macOS are not published yet.
-
-From v0.4.0 on there is a second build, with its own releases tagged
-`vX.Y.Z-reloaded`: see [MoHAA-Reloaded builds](#mohaa-reloaded-builds).
-
-## Installing on Windows
-
-1. Download the zip for your Windows: x64 for 64-bit Windows, x86 for 32-bit.
-2. Extract it into your Medal of Honor: Allied Assault folder, the one that
-   holds `main`. The zip has a `main` folder of its own, with the modern UI's
-   pack and the headphone set, which goes into yours.
-3. Start `launch_openmohaa_base.exe` (Allied Assault),
-   `launch_openmohaa_spearhead.exe` (Spearhead) or
-   `launch_openmohaa_breakthrough.exe` (Breakthrough), or pick one of them in
-   MoH Arena Guard.
-
-## Differences from OpenMoHAA
-
-The changes are marked `Added in MoH Arena` in the source, and the
-[differences page](docs/markdown/01-intro/04-differences.md#openmoh-arena)
-lists what players see. In short:
-
-* Windows builds can load the MoH Arena Guard module, which adds the F7 Guard
-  menu and the other MoH Arena features. The module loads only when Guard
-  starts the game and the module file has the SHA-256 that Guard gives.
-  In any other case the game runs like OpenMoHAA.
-* An [optional modern UI](#optional-modern-ui), off by default.
-* A first-person spectator view that a server can switch on for everyone who
-  follows a player (the serverinfo key `moharena_firstperson`). It shows the
-  followed player's weapon and hands, and the eye leans, pivots and bobs as
-  in that player's own view.
-* A first-person spectator who follows a player sees the scope of the rifle
-  that player holds. It was the Allied scope for every rifle before.
-* The modern UI has a fifth HUD style, "Spectator", for the spectator side
-  of an objective game: the layout of MoH Arena's match camera, with a list
-  of each team's players and a kill feed in the teams' colours.
-* On Allied Assault servers a crouched player is predicted with the right
-  height, so the view no longer shakes under a low ceiling.
-* The modern HUD asks a server with flood protection for the scores after an
-  event. It asked every two seconds before, and such a server then dropped a
-  reload or a chat line now and then.
-* The modern UI draws the characters above ASCII in names and chat lines, and
-  text typed into it leaves as Windows-1252, the game's text.
-* A dedicated server built from this code no longer lets a grenade go through
-  terrain (the "nade bug").
-* More parts of Project: Omaha, each off or as before until the player
-  changes it: a second [sound mixer](#sound), `cl_cmdfps` to send commands at
-  a fixed rate (held to 85-125), a limiter for `com_maxfps` above 1000,
-  `screenshotPNG`, a Curve style of mouse acceleration, and in the modern UI a
-  grenade charge bar, the sound settings and a Max FPS slider.
-
-OpenMoH Arena uses the same network protocol as OpenMoHAA, so it joins the
-same servers.
+Not on this branch: `main`'s PNG screenshots, Curve mouse acceleration and grenade charge bar, and Project: Omaha's `cl_cmdfps` (MoHAA-Reloaded has `cl_movefps`).
 
 ## Sound
 
-From v0.4.0 on the game has two sound mixers, picked with the cvar
-`s_backend`:
+Two sound mixers, picked with the cvar `s_backend`:
 
 | `s_backend` | Mixer |
 |---|---|
-| `openal` (default) | OpenMoHAA's own mixer, on OpenAL Soft, unchanged |
-| `omaha` | The mixer of Project: Omaha, on miniaudio. With `s_speaker_type 1` (headphones) it gives 3D sound with the SADIE KU100 set in `main/sound/prom/hrtf`. It has no surround: it turns a surround speaker type into headphones. |
+| `openal` (default) | OpenAL Soft, as in OpenMoHAA and `main`. The library ships next to the game (`OpenAL64.dll`, `libopenal.so.1`). |
+| `omaha` | The mixer of [Project: Omaha](https://github.com/JayRewd/omaha) by JayRewd, as MoHAA-Reloaded carries it (`code/client/omaha`). With `s_speaker_type 1` (headphones) it gives 3D sound with the SADIE KU100 set in `main/sound/prom/hrtf`. |
 
-The change takes effect after `snd_restart` or a restart of the game. MoH
-Arena Guard has an "Omaha sound mixer" box for it. When the Omaha mixer cannot
-start, OpenAL plays for that session.
+The change takes effect after `snd_restart` or a restart of the game. MoH Arena Guard has an "Omaha sound mixer" box for it. When the Omaha mixer cannot start, OpenAL plays for that session.
 
-With the Omaha mixer, `s_mix 1` (its default) plays footsteps louder and the
-other players' gunfire softer, as Project: Omaha made it; `s_mix 0` turns that
-off.
+## Binaries
 
-## Optional modern UI
+Each `vX.Y.Z-reloaded` release on the [Releases page](https://github.com/fecmtc/openmoh-arena/releases) comes with a Windows x64 zip and a Linux x64 tarball. Each holds the game, its libraries, the headphone set, `COPYING.txt`, `SOURCE-OFFER.txt` (with the commit and library versions), `THIRD-PARTY.txt`, `OMAHA-SOUND-LICENSES.txt`, the libraries' licences and `SHA256SUMS.txt`. The Linux tarball has no dedicated server.
 
-OpenMoH Arena can show the menus and HUD of
-[Project: Omaha](https://github.com/JayRewd/omaha) by JayRewd instead of the
-original ones.
-
-It is off by default. The player turns it on in MoH Arena Guard with the
-"Use the modern UI" box, and Guard then starts the client with
-`+set ui_legacy 0`. With it off, the game looks and behaves as it did before.
-
-Rules for work on it:
-
-* the original UI stays the default, and nothing of the modern UI may change it
-* what the modern UI may change is the fixed list in
-  `code/client/cl_moharena_uipolicy.cpp`, never the XML
-* a setting it offers must stay inside MoH Arena's rules
-* it changes a setting or a key bind only when the player changes the control
-  for it
-* its files ship as one pack, `main/zz_moharena_ui.pk3`, built by
-  `misc/moharena/make_modern_ui_pk3.py`
-
-Project: Omaha built its UI for Allied Assault. Spearhead and Breakthrough are
-not complete in it yet.
-
-See `docs/modern-ui/README.md` for how it is built and what was left out, and
-`misc/moharena/THIRD-PARTY.txt` for the credits and licences of the parts by
-others.
-
-## MoHAA-Reloaded builds
-
-The `mohaa-reloaded` branch is OpenMoH Arena on top of
-[MoHAA-Reloaded](https://github.com/fortemoh/MoHAA-Reloaded) by pstngh, with
-testing and ideas by notuern: a fork of OpenMoHAA with a Vulkan renderer, SDL3
-and movement as in the original game. It carries the MoH Arena changes of this
-branch except the modern UI and a few parts of Project: Omaha (that branch's
-README lists them), and has the Omaha sound mixer as well.
-
-Its releases are tagged `vX.Y.Z-reloaded` and come for Windows x64 and Linux
-x64. MoH Arena Guard accepts both builds and finds out by itself which one a
-game folder holds. OpenMoH Arena is not affiliated with or endorsed by
-MoHAA-Reloaded.
+These are the builds that [MoH Arena Guard](https://moharena.com/anti-cheat) accepts. Guard finds out by itself whether a game folder holds the `main` build or the Reloaded one. It checks the SHA-256 of the exe, so it does not start a build made anywhere else, even from the same source.
 
 ## Building
 
-OpenMoH Arena builds like OpenMoHAA, with CMake. OpenMoHAA's build
-documentation applies:
+The workflows that make the release builds list every library version and build option:
 
-https://github.com/openmoh/openmohaa
+| Workflow | Builds |
+|---|---|
+| [moharena-windows-reloaded.yml](.github/workflows/moharena-windows-reloaded.yml) | Windows x64 (MSVC): SDL3 3.4.18, OpenAL Soft 1.24.3, Vulkan headers v1.4.341 |
+| [moharena-linux-reloaded.yml](.github/workflows/moharena-linux-reloaded.yml) | Linux x64 (Ubuntu 22.04, clang, glibc 2.34): the same libraries |
 
-The MoH Arena bridge is off by default. The Windows release builds turn it on
-with `-DMOHARENA=ON`. The workflow that makes them,
-[moharena-windows.yml](.github/workflows/moharena-windows.yml), lists every
-library version and build option.
+MoHAA-Reloaded's own workflows are kept as they are.
 
-## Relationship to OpenMoHAA
+To build locally, the renderer needs the Vulkan headers ([Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers), or the Vulkan SDK) and SDL3. Vulkan itself is loaded when the game runs, through SDL.
 
-OpenMoH Arena is derived from OpenMoHAA.
-
-Upstream OpenMoHAA:
-
-https://github.com/openmoh/openmohaa
-
-OpenMoH Arena periodically incorporates relevant upstream fixes and improvements while maintaining its own competitive-focused changes.
-
-Where practical, generic fixes that are useful beyond OpenMoH Arena may be suitable for contribution back to upstream.
-
-## MoHArena
-
-OpenMoH Arena is intended to complement:
-
-https://moharena.com/
-
-MoHArena is the competitive platform and community layer, while OpenMoH Arena is intended to provide the game-engine/client side of that ecosystem.
-
-Conceptually:
-
-```text
-MoHArena
-Competitive platform, matches, community and services
-
-        +
-
-OpenMoH Arena
-Competitive MOHAA engine and client
+```bash
+cmake -B build -DMOHARENA=ON -DVulkanHeaders_DIR=<headers>/share/cmake/VulkanHeaders -DSDL3_DIR=<sdl3>/lib/cmake/SDL3
+cmake --build build
 ```
 
-## Compatibility
+## Credits
 
-Compatibility goals include preserving support for existing MOHAA gameplay and content wherever practical.
+* The OpenMoHAA team, for the engine (built on ioquake3 and the F.A.K.K SDK).
+* pstngh, for MoHAA-Reloaded and its Vulkan renderer; notuern, for testing and ideas.
+* JayRewd, for Project: Omaha and its sound mixer.
 
-However, competitive functionality may require behavior that differs from stock MOHAA or upstream OpenMoHAA.
-
-Any important compatibility differences should be documented as the project develops.
-
-## Contributing
-
-The public repository may accept issues, bug reports, technical discussion, and contributions in the future.
-
-Before contributing code, please keep changes focused and avoid unnecessary large-scale refactoring.
-
-Changes that improve OpenMoHAA generally rather than specifically serving OpenMoH Arena may also be appropriate for contribution to the upstream OpenMoHAA project.
-
-More detailed contribution guidelines will be added as the project matures.
+See `misc/moharena/THIRD-PARTY-reloaded.txt` and `code/thirdparty/OMAHA-SOUND-LICENSES.txt` for the parts by others and their licences.
 
 ## License
 
-OpenMoH Arena is based on OpenMoHAA and includes software distributed under the **GNU General Public License version 2**.
-
-See:
-
-```text
-COPYING.txt
-```
-
-for the license text included with the project.
-
-Original OpenMoHAA copyright and attribution notices are preserved in accordance with the applicable license requirements.
-
-OpenMoH Arena modifications and additions to the GPL-covered codebase are distributed under the applicable GPL terms.
+OpenMoH Arena is based on OpenMoHAA and includes software distributed under the GNU General Public License version 2 or later. See `COPYING.txt`.
 
 ## Game assets
 
-This repository does **not** provide the original commercial Medal of Honor: Allied Assault game assets.
-
-Users are responsible for obtaining any required original game data through lawful means.
-
-The open-source engine code and the original MOHAA game content are separate.
-
-## Disclaimer
-
-OpenMoH Arena is an independent community project.
-
-It is not affiliated with, sponsored by, or endorsed by Electronic Arts, the original Medal of Honor developers, or the OpenMoHAA maintainers.
-
-Medal of Honor and related names and assets may be trademarks or copyrighted works of their respective owners.
+This repository does **not** provide the original commercial Medal of Honor: Allied Assault game assets. Users are responsible for obtaining any required original game data through lawful means.
 
 ## Links
 
 * MoHArena: https://moharena.com/
-* OpenMoHAA upstream: https://github.com/openmoh/openmohaa
 * OpenMoH Arena source: https://github.com/fecmtc/openmoh-arena
-
+* MoHAA-Reloaded: https://github.com/fortemoh/MoHAA-Reloaded
+* OpenMoHAA upstream: https://github.com/openmoh/openmohaa

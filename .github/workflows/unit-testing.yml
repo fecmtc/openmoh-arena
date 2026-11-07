@@ -15,15 +15,49 @@ jobs:
     name: "Running unit tests"
     runs-on: ubuntu-latest
     environment: "testing"
+    env:
+        sdl3-branch: 'release-3.4.18'
 
     steps:
     # Added in MoH Arena: plain apt-get instead of awalsh128/cache-apt-pkgs-action.
     # When apt failed, that action still saved an empty package cache, so every
-    # later run stopped at Configure CMake without SDL2.
+    # later run stopped at Configure CMake.
     - name: Install required packages
       run: |
         sudo apt-get update
-        sudo apt-get install -y flex bison ninja-build cmake clang libsdl2-dev libopenal-dev
+        sudo apt-get install -y flex bison ninja-build cmake clang libopenal-dev
+
+    # SDL 3 (Ubuntu 24.04 has none), without video drivers: the tests open
+    # no window
+    - name: Cache SDL3
+      id: cache-sdl3
+      uses: actions/cache@v4
+      with:
+        path: 'thirdparties/SDL3/install'
+        key: ${{ runner.os }}-unittest-sdl3-${{ env.sdl3-branch }}-v1
+
+    - name: Checkout SDL3
+      if: steps.cache-sdl3.outputs.cache-hit != 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: 'libsdl-org/SDL'
+        path: 'thirdparties/SDL3'
+        ref: '${{ env.sdl3-branch }}'
+
+    - name: Configure and install SDL3
+      if: steps.cache-sdl3.outputs.cache-hit != 'true'
+      working-directory: ${{github.workspace}}/thirdparties/SDL3
+      run: |
+        cmake -B ./build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSDL_TESTS=OFF \
+        -DSDL_EXAMPLES=OFF \
+        -DSDL_X11=OFF \
+        -DSDL_WAYLAND=OFF \
+        -DSDL_UNIX_CONSOLE_BUILD=ON \
+        -DCMAKE_INSTALL_PREFIX='${{github.workspace}}/thirdparties/SDL3/install'
+        cmake --build ./build --config Release --parallel
+        cmake --install ./build --config Release
 
     - uses: actions/checkout@v4
       with:
@@ -36,9 +70,9 @@ jobs:
         echo "CC=clang" >> $GITHUB_ENV
         echo "CXX=clang++" >> $GITHUB_ENV
         echo "CMAKE_PARAM=--log-level=VERBOSE \
-        -DCMAKE_INSTALL_PREFIX='${{github.workspace}}/install'" \
-        -DUSE_RENDERER_DLOPEN=OFF \
-        -DBUILD_RENDERER_GL2=OFF >> $GITHUB_ENV
+        -DCMAKE_INSTALL_PREFIX='${{github.workspace}}/install' \
+        -DSDL3_DIR='${{github.workspace}}/thirdparties/SDL3/install/lib/cmake/SDL3'" \
+        -DBUILD_RENDERER_VULKAN=OFF >> $GITHUB_ENV
 
     - name: Configure CMake
       working-directory: ${{github.workspace}}

@@ -24,8 +24,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // A small optional draw API for the MoH Arena client bridge (cl_moharena.cpp):
 // textures and indexed triangle lists drawn on top of the 2D screen. Only the
-// GL1 renderer has it, and only when linked into the client. The renderer's
-// own table (refexport_t) and REF_API_VERSION stay unchanged.
+// Vulkan renderer has it (renderervk/tr_moharena.c), and only when linked into
+// the client. The renderer's own table (refexport_t) and REF_API_VERSION stay
+// unchanged.
 
 #pragma once
 

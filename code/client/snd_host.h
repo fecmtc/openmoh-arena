@@ -24,11 +24,10 @@ source tree, or write to the Free Software Foundation, Inc.,
 
 // DESCRIPTION:
 // Sound host table. A host owns MOH channel policy, music, streams and the
-// output device. The stock OpenAL host (snd_openal_new.cpp, unchanged) is
-// always built; the Omaha host (omaha/) is optional (USE_OMAHA_SOUND).
-// s_backend picks one at S_Init; everything else in the client is host-neutral.
-//
-// Included from snd_local_new.h (needs soundsystemsavegame_t).
+// output device. Two hosts are built: the stock OpenAL one
+// (snd_openal_new.cpp, unchanged, through snd_host_openal.cpp) and the
+// Omaha mixer (omaha/). s_backend picks one at S_Init; everything else in
+// the client is host-neutral.
 
 #pragma once
 
@@ -72,6 +71,10 @@ typedef struct sndHost_s {
     const char *(*GetMusicFilename)(void);
     int (*GetMusicLoopCount)(void);
     unsigned int (*GetMusicOffset)(void);
+    // Releases what the host made from sfx (renderer sound) before the core frees or reloads it
+    void (*FreeSfx)(sfx_t *sfx);
+    // Makes the renderer sound of a registered sfx before its first play (s_loadBuffers)
+    void (*PreloadSfx)(sfx_t *sfx);
 
     // Public sound API implemented by the host (dispatched in snd_host.cpp)
     void (*MusicNewSoundtrack)(const char *name);
@@ -92,13 +95,6 @@ typedef struct sndHost_s {
     qboolean (*NeedFullRestart)(void);
     void (*PrintInfo)(void);
     void (*DumpInfo)(void);
-
-    // Mixed PCM for AVI / MP4 demo export
-    qboolean (*CaptureBegin)(void);
-    void (*CaptureEnd)(void);
-    void (*CaptureFrame)(int aviFps);
-    qboolean (*CaptureActive)(void);
-    int (*CaptureSampleRate)(void);
 } sndHost_t;
 
 extern const sndHost_t  s_sndHostOpenAL;

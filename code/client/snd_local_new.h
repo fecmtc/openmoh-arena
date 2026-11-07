@@ -35,6 +35,8 @@ extern cvar_t *s_loadas8bit;
 extern cvar_t *s_separation;
 extern cvar_t *s_musicVolume;
 extern cvar_t *s_ambientVolume;
+extern cvar_t *s_soundtrackCache;
+extern cvar_t *s_loadBuffers;
 
 #define MAX_SOUNDSYSTEM_CHANNELS_3D        32
 #define MAX_SOUNDSYSTEM_CHANNELS_2D        32
@@ -63,6 +65,9 @@ typedef struct {
     int dataofs;
     int datasize;
     int dataalign;
+
+    // Added in Omaha: rate of the file before DownSampleWav (sfx_info loop points use it)
+    float srcrate;
 } wavinfo_t;
 
 typedef struct sfx_s {
@@ -162,6 +167,8 @@ enum channel_flags_t {
     CHANNEL_FLAG_LOOPING        = 128,
     // Added in OPM
     CHANNEL_FLAG_MISSING_ENT    = 256,
+    // Added in Omaha: the voice belongs to a loop slot (AddLoopSounds), not a one-shot
+    CHANNEL_FLAG_LOOP_OWNED     = 512,
 };
 
 enum sfx_flags_t {
@@ -170,6 +177,9 @@ enum sfx_flags_t {
     SFX_FLAG_STREAMED      = 4,
     SFX_FLAG_NO_OFFSET     = 8,
     SFX_FLAG_NULL          = 16,
+    // Added in Omaha: streamed combat VO force-load (s_pain_hrtf) was tried once
+    SFX_FLAG_PROMOTE_DONE   = 32,
+    SFX_FLAG_PROMOTE_FAILED = 64,
 };
 
 enum loopsound_flags_t {
@@ -235,6 +245,8 @@ qboolean S_LoadSound(const char *fileName, sfx_t *sfx, int streamed, qboolean fo
 #define S_Driver_GetMusicFilename       s_sndHost->GetMusicFilename
 #define S_Driver_GetMusicLoopCount      s_sndHost->GetMusicLoopCount
 #define S_Driver_GetMusicOffset         s_sndHost->GetMusicOffset
+#define S_Driver_PreloadSfx             s_sndHost->PreloadSfx
+#define S_Driver_FreeSfx                s_sndHost->FreeSfx
 
 void S_PrintInfo();
 void S_DumpInfo();

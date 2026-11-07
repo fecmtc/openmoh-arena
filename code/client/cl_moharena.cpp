@@ -32,8 +32,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // Without the launcher, on any mismatch, or in builds without
 // MOHARENA_NATIVE_BRIDGE, every call here does nothing. Drawing also needs the
-// GL1 renderer linked into the client (MOHARENA_RENDER_API); without it the
-// module gets no render services.
+// Vulkan renderer linked into the client (MOHARENA_RENDER_API); without it
+// the module gets no render services.
 
 #include "client.h"
 #include "cl_ui.h"

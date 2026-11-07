@@ -1,0 +1,36 @@
+OpenMoH Arena - work by others in this build
+============================================
+
+The renderer and many of the client's changes come from MoHAA-Reloaded by
+pstngh, with testing and ideas by notuern, a fork of OpenMoHAA published
+under the GNU General Public License, version 2 or later:
+  https://github.com/fortemoh/MoHAA-Reloaded (branch vulkan)
+OpenMoH Arena is not affiliated with or endorsed by MoHAA-Reloaded.
+
+The Omaha sound mixer (s_backend omaha) comes from Project: Omaha by
+JayRewd, a fork of OpenMoHAA published under the GNU General Public
+License, version 2 or later:
+  https://github.com/JayRewd/omaha
+OpenMoH Arena is not affiliated with or endorsed by Project: Omaha.
+
+Code built into the game for the Omaha mixer. The sources and the full
+license texts are in code/thirdparty of the OpenMoH Arena source code;
+the notices that must travel with the program are in
+OMAHA-SOUND-LICENSES.txt next to this file:
+  - libmysofa by Symonics GmbH and Christian Hoene (BSD 3-clause), with
+    parts of the Speex resampler by Jean-Marc Valin and Thorvald Natvig
+    (BSD 3-clause)
+  - PFFFT by Julien Pommier, Hayati Ayguen and Dario Mambro, from
+    FFTPACK by UCAR (FFTPACK license)
+  - miniaudio by David Reid (Unlicense or MIT No Attribution)
+
+Files in main/sound/prom:
+  - hrtf/SADIE_KU100_DFC_256_order_fir_48000.sofa: the Neumann KU100
+    head-related transfer functions from the SADIE database, Copyright
+    University of York. Apache License 2.0. The license and the citation
+    are hrtf/SADIE_LICENSE.txt and hrtf/README.txt in the same folder.
+  - hitmarkers/beep.wav and hitmarkers/classic.wav: from Project: Omaha,
+    as published in its repository.
+
+The licenses of the other libraries in this package are in the licenses
+folder next to this file.

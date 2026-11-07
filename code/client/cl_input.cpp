@@ -28,13 +28,41 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 unsigned	frame_msec;
 int			old_com_frameTime;
+static int	old_look_frameTime;	// com_frameTime of the last CL_ApplyLook
 
-// Added in Omaha: usercmd / pmove rate (85..125), independent of render FPS
-cvar_t		*cl_cmdfps;
-// Added in Omaha: late mouse before cgame view
-cvar_t		*cl_lowLatencyInput;
-// Added in Omaha: render-frame resample of the newest usercmd; consume no taps
-static qboolean	cl_keepLatches;
+cvar_t		*cl_movefps;			// usercmds a second, whatever the frame rate; 0: one per frame
+static cvar_t	*cl_movesubgrid;	// a shot's or a jump's usercmd at the half step (CL_SubGridStep)
+static cvar_t	*cl_nullbinds;		// opposing movement and lean keys: the newest press wins (CL_NullbindKey)
+
+/*
+=================
+CL_MoveInterval
+
+The usercmd step of cl_movefps in whole milliseconds of server time, 1000 /
+cl_movefps (85 to 125 a second: 11 to 8 ms), or 0 for cl_movefps 0 (and
+below): one usercmd per frame at the frame's server time, as a stock client,
+each as long as its frame (as on the metal branch)
+=================
+*/
+static int CL_MoveInterval( void ) {
+	if ( cl_movefps->integer <= 0 ) {
+		return 0;
+	}
+	return 1000 / (int)Com_Clamp( 85, 125, cl_movefps->integer );
+}
+
+/*
+=================
+CL_CommandPerFrame
+
+cl_movefps 0: one usercmd per frame. Com_Frame then keeps every frame a
+whole millisecond or longer, at most 1000 a second (also uncapped), as stock:
+each usercmd has a server time of its own.
+=================
+*/
+qboolean CL_CommandPerFrame( void ) {
+	return cl_movefps && cl_movefps->integer <= 0;
+}
 
 /*
 ===============================================================================
@@ -257,6 +285,87 @@ float CL_KeyState( kbutton_t *key ) {
 
 
 
+/*
+===============================================================================
+
+NULLBINDS
+
+Opposing movement and lean keys never cancel out: the newest press wins while
+the other side's key stays held, and releasing it hands control back. kbutton_t
+already tracks the keys holding a button separately from its effective state,
+so only active, the partial-frame msec and wasPressed are adjusted here.
+
+===============================================================================
+*/
+
+static qboolean CL_NullbindHeld( const kbutton_t *b ) {
+	return (qboolean)( b->down[0] || b->down[1] );
+}
+
+static void CL_NullbindSuppress( kbutton_t *b, unsigned time ) {
+	unsigned	elapsed;
+
+	if ( !b->active ) {
+		return;
+	}
+	b->active = qfalse;
+
+	if ( !time || !b->downtime ) {
+		b->msec += frame_msec / 2;
+		return;
+	}
+
+	// unsigned subtraction handles timer wrap; a delta with the high bit set
+	// is an out-of-order timestamp, so credit no phantom movement
+	elapsed = time - b->downtime;
+	if ( elapsed < 0x80000000u ) {
+		b->msec += elapsed;
+	}
+}
+
+static void CL_NullbindKey( kbutton_t *b, kbutton_t *opposite, qboolean down ) {
+	int			holders[2] = { b->down[0], b->down[1] };
+	qboolean	suppressed = (qboolean)( !b->active && CL_NullbindHeld( b ) );
+	unsigned	msec = b->msec;
+	unsigned	time;
+
+	if ( down ) {
+		IN_KeyDown( b );
+	} else {
+		IN_KeyUp( b );
+	}
+
+	if ( b->down[0] == holders[0] && b->down[1] == holders[1] ) {
+		return;		// repeat, third key, or release without a matching press
+	}
+	if ( down && !cl_nullbinds->integer ) {
+		return;		// stock: both sides held cancel out
+	}
+
+	// sub-frame taps belong to the winning side, so a usercmd never carries
+	// both sides of a button pair
+	time = atoi( Cmd_Argv( 2 ) );
+	if ( down ) {
+		// the newest press wins
+		CL_NullbindSuppress( opposite, time );
+		opposite->wasPressed = qfalse;
+		return;
+	}
+
+	if ( suppressed ) {
+		// IN_KeyUp credits a suppressed button from its stale downtime, but
+		// that time was already settled when the button was suppressed
+		b->msec = msec;
+	}
+
+	// releasing the winner hands control back to a side still held
+	if ( !CL_NullbindHeld( b ) && CL_NullbindHeld( opposite ) && !opposite->active ) {
+		opposite->downtime = time;
+		opposite->active = qtrue;
+		b->wasPressed = qfalse;
+	}
+}
+
 void IN_UpDown(void) {IN_KeyDown(&in_up);}
 void IN_UpUp(void) {IN_KeyUp(&in_up);}
 void IN_DownDown(void) {IN_KeyDown(&in_down);}
@@ -265,28 +374,28 @@ void IN_LeftDown(void) {IN_KeyDown(&in_left);}
 void IN_LeftUp(void) {IN_KeyUp(&in_left);}
 void IN_RightDown(void) {IN_KeyDown(&in_right);}
 void IN_RightUp(void) {IN_KeyUp(&in_right);}
-void IN_ForwardDown(void) {IN_KeyDown(&in_forward);}
-void IN_ForwardUp(void) {IN_KeyUp(&in_forward);}
-void IN_BackDown(void) {IN_KeyDown(&in_back);}
-void IN_BackUp(void) {IN_KeyUp(&in_back);}
+void IN_ForwardDown(void) {CL_NullbindKey(&in_forward, &in_back, qtrue);}
+void IN_ForwardUp(void) {CL_NullbindKey(&in_forward, &in_back, qfalse);}
+void IN_BackDown(void) {CL_NullbindKey(&in_back, &in_forward, qtrue);}
+void IN_BackUp(void) {CL_NullbindKey(&in_back, &in_forward, qfalse);}
 void IN_LookupDown(void) {IN_KeyDown(&in_lookup);}
 void IN_LookupUp(void) {IN_KeyUp(&in_lookup);}
 void IN_LookdownDown(void) {IN_KeyDown(&in_lookdown);}
 void IN_LookdownUp(void) {IN_KeyUp(&in_lookdown);}
-void IN_MoveleftDown(void) {IN_KeyDown(&in_moveleft);}
-void IN_MoveleftUp(void) {IN_KeyUp(&in_moveleft);}
-void IN_MoverightDown(void) {IN_KeyDown(&in_moveright);}
-void IN_MoverightUp(void) {IN_KeyUp(&in_moveright);}
+void IN_MoveleftDown(void) {CL_NullbindKey(&in_moveleft, &in_moveright, qtrue);}
+void IN_MoveleftUp(void) {CL_NullbindKey(&in_moveleft, &in_moveright, qfalse);}
+void IN_MoverightDown(void) {CL_NullbindKey(&in_moveright, &in_moveleft, qtrue);}
+void IN_MoverightUp(void) {CL_NullbindKey(&in_moveright, &in_moveleft, qfalse);}
 void IN_AttackPrimaryDown(void) { IN_KeyDown(&in_buttons[0]);}
 void IN_AttackPrimaryUp(void) { IN_KeyUp(&in_buttons[0]); }
 void IN_AttackSecondaryDown(void) { IN_KeyDown(&in_buttons[1]); }
 void IN_AttackSecondaryUp(void) { IN_KeyUp(&in_buttons[1]); }
 void IN_UseDown(void) { IN_KeyDown(&in_buttons[3]); }
 void IN_UseUp(void) { IN_KeyUp(&in_buttons[3]); }
-void IN_LeanLeftDown(void) { IN_KeyDown(&in_buttons[4]); }
-void IN_LeanLeftUp(void) { IN_KeyUp(&in_buttons[4]); }
-void IN_LeanRightDown(void) { IN_KeyDown(&in_buttons[5]); }
-void IN_LeanRightUp(void) { IN_KeyUp(&in_buttons[5]); }
+void IN_LeanLeftDown(void) { CL_NullbindKey(&in_buttons[4], &in_buttons[5], qtrue); }
+void IN_LeanLeftUp(void) { CL_NullbindKey(&in_buttons[4], &in_buttons[5], qfalse); }
+void IN_LeanRightDown(void) { CL_NullbindKey(&in_buttons[5], &in_buttons[4], qtrue); }
+void IN_LeanRightUp(void) { CL_NullbindKey(&in_buttons[5], &in_buttons[4], qfalse); }
 
 void IN_SpeedDown(void) {IN_KeyDown(&in_speed);}
 void IN_SpeedUp(void) {IN_KeyUp(&in_speed);}
@@ -315,10 +424,10 @@ void IN_Button2Down(void) {IN_KeyDown(&in_buttons[2]);}
 void IN_Button2Up(void) {IN_KeyUp(&in_buttons[2]);}
 void IN_Button3Down(void) {IN_KeyDown(&in_buttons[3]);}
 void IN_Button3Up(void) {IN_KeyUp(&in_buttons[3]);}
-void IN_Button4Down(void) {IN_KeyDown(&in_buttons[4]);}
-void IN_Button4Up(void) {IN_KeyUp(&in_buttons[4]);}
-void IN_Button5Down(void) {IN_KeyDown(&in_buttons[5]);}
-void IN_Button5Up(void) {IN_KeyUp(&in_buttons[5]);}
+void IN_Button4Down(void) {CL_NullbindKey(&in_buttons[4], &in_buttons[5], qtrue);}
+void IN_Button4Up(void) {CL_NullbindKey(&in_buttons[4], &in_buttons[5], qfalse);}
+void IN_Button5Down(void) {CL_NullbindKey(&in_buttons[5], &in_buttons[4], qtrue);}
+void IN_Button5Up(void) {CL_NullbindKey(&in_buttons[5], &in_buttons[4], qfalse);}
 void IN_Button6Down(void) {IN_KeyDown(&in_buttons[6]);}
 void IN_Button6Up(void) {IN_KeyUp(&in_buttons[6]);}
 void IN_Button7Down(void) {IN_KeyDown(&in_buttons[7]);}
@@ -391,30 +500,6 @@ void CL_AdjustAngles( void ) {
 
 /*
 ================
-CL_MoveKeyState
-
-Added in Omaha: CL_KeyState, but a tap since the last usercmd counts fully
-(usercmds can be several render frames apart).
-================
-*/
-static float CL_MoveKeyState( kbutton_t *key ) {
-	const qboolean tapped = key->wasPressed;
-	float          val;
-
-	// Changed in MoH Arena: with cl_cmdfps off, the original key state
-	if ( !cl_cmdfps->integer ) {
-		return CL_KeyState( key );
-	}
-	if ( cl_keepLatches ) {
-		return ( key->active || tapped ) ? 1.0f : 0.0f;
-	}
-	val             = CL_KeyState( key );
-	key->wasPressed = qfalse;
-	return tapped ? 1.0f : val;
-}
-
-/*
-================
 CL_KeyMove
 
 Sets the usercmd_t based on key states
@@ -429,19 +514,19 @@ void CL_KeyMove( usercmd_t *cmd ) {
 	up = 0;
 	movespeed = 127;
 	if ( in_strafe.active ) {
-		side += movespeed * CL_MoveKeyState (&in_right);
-		side -= movespeed * CL_MoveKeyState (&in_left);
+		side += movespeed * CL_KeyState (&in_right);
+		side -= movespeed * CL_KeyState (&in_left);
 	}
 
-	side += movespeed * CL_MoveKeyState (&in_moveright);
-	side -= movespeed * CL_MoveKeyState (&in_moveleft);
+	side += movespeed * CL_KeyState (&in_moveright);
+	side -= movespeed * CL_KeyState (&in_moveleft);
 
 
-	up += movespeed * CL_MoveKeyState (&in_up);
-	up -= movespeed * CL_MoveKeyState (&in_down);
+	up += movespeed * CL_KeyState (&in_up);
+	up -= movespeed * CL_KeyState (&in_down);
 
-	forward += movespeed * CL_MoveKeyState (&in_forward);
-	forward -= movespeed * CL_MoveKeyState (&in_back);
+	forward += movespeed * CL_KeyState (&in_forward);
+	forward -= movespeed * CL_KeyState (&in_back);
 
 	cmd->forwardmove = ClampChar( forward );
 	cmd->rightmove = ClampChar( side );
@@ -538,8 +623,8 @@ void CL_MouseEvent( int dx, int dy, int time ) {
 	}
 	else if ( !paused->integer )
 	{
-		cl.mouseDx[cl.mouseIndex] += dx;
-		cl.mouseDy[cl.mouseIndex] += dy;
+		cl.mouseDx += dx;
+		cl.mouseDy += dy;
 	}
 }
 
@@ -587,12 +672,46 @@ void CL_UpdateMouse() {
 
 /*
 =================
+CL_JoystickLook
+
+The joystick's turning, every frame (CL_ApplyLook)
+=================
+*/
+static void CL_JoystickLook( void ) {
+	float	anglespeed;
+
+	float yaw     = j_yaw->value     * cl.joystickAxis[j_yaw_axis->integer];
+	float right   = j_side->value    * cl.joystickAxis[j_side_axis->integer];
+	float forward = j_forward->value * cl.joystickAxis[j_forward_axis->integer];
+	float pitch   = j_pitch->value   * cl.joystickAxis[j_pitch_axis->integer];
+
+	if ( in_speed.active ) {
+		anglespeed = 0.001 * cls.frametime * cl_anglespeedkey->value;
+	} else {
+		anglespeed = 0.001 * cls.frametime;
+	}
+
+	if ( !in_strafe.active ) {
+		cl.viewangles[YAW] += anglespeed * yaw;
+	} else {
+		cl.viewangles[YAW] += anglespeed * right;
+	}
+
+	if ( in_mlooking ) {
+		cl.viewangles[PITCH] += anglespeed * forward;
+	} else {
+		cl.viewangles[PITCH] += anglespeed * pitch;
+	}
+}
+
+/*
+=================
 CL_JoystickMove
+
+The joystick's movement, into each usercmd
 =================
 */
 void CL_JoystickMove( usercmd_t *cmd ) {
-	float	anglespeed;
-
 	float yaw     = j_yaw->value     * cl.joystickAxis[j_yaw_axis->integer];
 	float right   = j_side->value    * cl.joystickAxis[j_side_axis->integer];
 	float forward = j_forward->value * cl.joystickAxis[j_forward_axis->integer];
@@ -603,25 +722,15 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 		cmd->buttons |= BUTTON_RUN;
 	}
 
-	if ( in_speed.active ) {
-		anglespeed = 0.001 * cls.frametime * cl_anglespeedkey->value;
-	} else {
-		anglespeed = 0.001 * cls.frametime;
-	}
-
 	if ( !in_strafe.active ) {
-		cl.viewangles[YAW] += anglespeed * yaw;
 		cmd->rightmove = ClampChar( cmd->rightmove + (int)right );
 	} else {
-		cl.viewangles[YAW] += anglespeed * right;
 		cmd->rightmove = ClampChar( cmd->rightmove + (int)yaw );
 	}
 
 	if ( in_mlooking ) {
-		cl.viewangles[PITCH] += anglespeed * forward;
 		cmd->forwardmove = ClampChar( cmd->forwardmove + (int)pitch );
 	} else {
-		cl.viewangles[PITCH] += anglespeed * pitch;
 		cmd->forwardmove = ClampChar( cmd->forwardmove + (int)forward );
 	}
 
@@ -630,130 +739,63 @@ void CL_JoystickMove( usercmd_t *cmd ) {
 
 /*
 =================
-CL_MouseAccelSensitivity
+CL_MouseLook
 
-Added in Omaha: sensitivity for a mouse speed in counts per millisecond.
-Style 0 is legacy (linear in speed). Style 1 is power, one axis of the per-axis curve (needs frame_msec).
-Style 2 is the offset curve; cl_mouseSensCap applies only there.
+The mouse's turning, every frame (CL_ApplyLook); its strafe and BUTTON_ANY
+wait for the next usercmd (CL_CreateCmd)
 =================
 */
-float CL_MouseAccelSensitivity( float rate ) {
-	float sens;
-	float cap;
-	int   style;
-
-	sens = cl_sensitivity->value;
-	if (cl_mouseAccel->value == 0.0f) {
-		return sens;
-	}
-
-	style = cl_mouseAccelStyle->integer;
-	if (style == 0) {
-		return sens + rate * cl_mouseAccel->value;
-	}
-
-	if (style == 1) {
-		float offset = cl_mouseAccelOffset->value;
-		float msec;
-		float counts;
-		float power;
-		float out;
-
-		if (offset <= 0.0f || rate <= 0.0f) {
-			return sens;
-		}
-		msec = (frame_msec < 1) ? 1.0f : (float)frame_msec;
-		counts = rate * msec;
-		power = powf(rate / offset, cl_mouseAccel->value);
-		out = sens * (counts + power * offset);
-		return out / counts;
-	}
-
-	{
-		float base = (rate - cl_mouseAccelOffset->value) * cl_mouseAccel->value;
-
-		// powf of a negative base is NaN
-		if (base > 0.0f) {
-			sens += powf(base, cl_mouseAccelPower->value - 1.0f);
-		}
-	}
-
-	cap = cl_mouseSensCap->value;
-	if (cap > 0.0f && sens > cap) {
-		sens = cap;
-	}
-	return sens;
-}
-
-/*
-=================
-CL_MouseMove
-=================
-*/
-void CL_MouseMove( usercmd_t *cmd ) {
+static void CL_MouseLook( void ) {
 	float	mx, my;
 	float	cgameSensitivity;
 
-	// allow mouse smoothing
-	// Changed in Omaha: cl_lowLatencyInput reads the mouse again this frame; raw deltas only
-	if (m_filter->integer && !(cl_lowLatencyInput && cl_lowLatencyInput->integer))
-	{
-		mx = (cl.mouseDx[0] + cl.mouseDx[1]) * 0.5f;
-		my = (cl.mouseDy[0] + cl.mouseDy[1]) * 0.5f;
-	}
-	else
-	{
-		mx = cl.mouseDx[cl.mouseIndex];
-		my = cl.mouseDy[cl.mouseIndex];
-	}
-
-	cl.mouseIndex ^= 1;
-	cl.mouseDx[cl.mouseIndex] = 0;
-	cl.mouseDy[cl.mouseIndex] = 0;
+	// the movement since the last frame, unfiltered (no m_filter: averaging
+	// with the frame before showed half of every movement a frame later)
+	mx = cl.mouseDx;
+	my = cl.mouseDy;
+	cl.mouseDx = 0;
+	cl.mouseDy = 0;
 
     if (mx == 0.0f && my == 0.0f)
         return;
 
-	// Changed in Omaha: style 2 is the offset curve, shared with the settings preview.
-	// Style 0 and 1 keep their previous formulas.
-	if (cl_mouseAccel->value != 0.0f && cl_mouseAccelStyle->integer == 1)
+	if (cl_mouseAccel->value != 0.0f)
 	{
-		float rate[2];
-		float power[2];
-		float offset;
-
-		offset = cl_mouseAccelOffset->value;
-		if (offset > 0.0f)
+		if(cl_mouseAccelStyle->integer == 0)
 		{
+			float accelSensitivity;
+			float rate;
+			
+			rate = sqrt(mx * mx + my * my) / (float) frame_msec;
+
+			accelSensitivity = cl_sensitivity->value + rate * cl_mouseAccel->value;
+			mx *= accelSensitivity;
+			my *= accelSensitivity;
+			
+			if(cl_showMouseRate->integer)
+				Com_Printf("rate: %f, accelSensitivity: %f\n", rate, accelSensitivity);
+		}
+		else
+		{
+			float rate[2];
+			float power[2];
+
+			// sensitivity remains pretty much unchanged at low speeds
+			// cl_mouseAccel is a power value to how the acceleration is shaped
+			// cl_mouseAccelOffset is the rate for which the acceleration will have doubled the non accelerated amplification
+			// NOTE: decouple the config cvars for independent acceleration setup along X and Y?
+
 			rate[0] = fabs(mx) / (float) frame_msec;
 			rate[1] = fabs(my) / (float) frame_msec;
-			power[0] = powf(rate[0] / offset, cl_mouseAccel->value);
-			power[1] = powf(rate[1] / offset, cl_mouseAccel->value);
+			power[0] = powf(rate[0] / cl_mouseAccelOffset->value, cl_mouseAccel->value);
+			power[1] = powf(rate[1] / cl_mouseAccelOffset->value, cl_mouseAccel->value);
 
-			mx = cl_sensitivity->value * (mx + ((mx < 0) ? -power[0] : power[0]) * offset);
-			my = cl_sensitivity->value * (my + ((my < 0) ? -power[1] : power[1]) * offset);
+			mx = cl_sensitivity->value * (mx + ((mx < 0) ? -power[0] : power[0]) * cl_mouseAccelOffset->value);
+			my = cl_sensitivity->value * (my + ((my < 0) ? -power[1] : power[1]) * cl_mouseAccelOffset->value);
 
 			if(cl_showMouseRate->integer)
 				Com_Printf("ratex: %f, ratey: %f, powx: %f, powy: %f\n", rate[0], rate[1], power[0], power[1]);
 		}
-		else
-		{
-			mx *= cl_sensitivity->value;
-			my *= cl_sensitivity->value;
-		}
-	}
-	else if (cl_mouseAccel->value != 0.0f)
-	{
-		float accelSensitivity;
-		float rate;
-
-		rate = sqrt(mx * mx + my * my) / (float) frame_msec;
-		accelSensitivity = CL_MouseAccelSensitivity(rate);
-		mx *= accelSensitivity;
-		my *= accelSensitivity;
-
-		if(cl_showMouseRate->integer)
-			Com_Printf("rate: %f, accelSensitivity: %f\n", rate, accelSensitivity);
 	}
 	else
 	{
@@ -772,25 +814,18 @@ void CL_MouseMove( usercmd_t *cmd ) {
 	mx *= cgameSensitivity;
 	my *= cgameSensitivity;
 
-	cmd->buttons |= BUTTON_ANY;
+	cl.lookButtons |= BUTTON_ANY;
 
-	// add mouse X/Y movement to cmd
-	// Changed in Omaha: mouse strafe accumulates until the next usercmd (CL_CreateCmd)
-	// Changed in MoH Arena: only with cl_cmdfps on; otherwise it goes in this cmd
-	if(in_strafe.active) {
-		if (cl_cmdfps->integer)
-			cl.mouseStrafe[0] += m_side->value * mx;
-		else
-			cmd->rightmove = ClampChar(cmd->rightmove + m_side->value * mx);
-	} else
+	// add mouse X/Y movement to the next cmd
+	if(in_strafe.active)
+		cl.lookMove[0] += m_side->value * mx;
+	else
 		cl.viewangles[YAW] -= m_yaw->value * mx;
 
 	if ((in_mlooking || cl_freelook->integer) && !in_strafe.active)
 		cl.viewangles[PITCH] += m_pitch->value * my;
-	else if (cl_cmdfps->integer)
-		cl.mouseStrafe[1] -= m_forward->value * my;
 	else
-		cmd->forwardmove = ClampChar(cmd->forwardmove - m_forward->value * my);
+		cl.lookMove[1] -= m_forward->value * my;
 
 	if (!isfinite(cl.viewangles[PITCH]) || !isfinite(cl.viewangles[YAW])) {
 		Com_DPrintf("Invalid client viewangles encountered (view pitch: %f, view yaw: %f)!\n", cl.viewangles[PITCH], cl.viewangles[YAW]);
@@ -827,8 +862,7 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		if ( in_buttons[i].active || in_buttons[i].wasPressed ) {
 			cmd->buttons |= 1 << i;
 		}
-		if ( !cl_keepLatches ) // Changed in Omaha
-			in_buttons[i].wasPressed = qfalse;
+		in_buttons[i].wasPressed = qfalse;
 	}
 
 	if (UI_MenuActive() || UI_ConsoleIsOpen()) {
@@ -839,8 +873,8 @@ void CL_CmdButtons( usercmd_t *cmd ) {
 		cmd->buttons |= BUTTON_RUN;
 	}
 
-	if (cge && !cl_keepLatches) {
-		// send weapon commands from cg (Changed in Omaha: consumed per call, so phys ticks only)
+	if (cge) {
+		// send weapon commands from cg
 		cmd->buttons |= cge->CG_WeaponCommandButtonBits();
 	}
 
@@ -876,58 +910,52 @@ void CL_FinishMove( usercmd_t *cmd ) {
 
 /*
 =================
-CL_CreateCmd
+CL_ApplyLook
+
+Turns the view with this frame's input: the keyboard, the mouse and the
+joystick, every frame. Usercmds come at cl_movefps (CL_CreateNewCommands) and
+carry the angles of the frame that makes them; cgame turns the view of the
+frames between them (CL_GetViewUserCmd). The picture's step uses the keys
+held now (CL_GetLiveUserCmd). The usercmd still waits for the grid (at
+cl_movefps 0 every frame makes one).
 =================
 */
-usercmd_t CL_CreateCmd( void ) {
-	usercmd_t	cmd;
+static void CL_ApplyLook( void ) {
 	vec3_t		oldAngles;
+	unsigned	cmdMsec;
 
 	VectorCopy( cl.viewangles, oldAngles );
 
+	// the keys and the mouse rate take the fraction of this frame; a frame
+	// in the same millisecond as the last one counts as 1 ms, as in
+	// CL_CreateNewCommands
+	cmdMsec = frame_msec;
+	frame_msec = com_frameTime - old_look_frameTime;
+	if ( frame_msec < 1 ) {
+		frame_msec = 1;
+	}
+	if ( frame_msec > 200 ) {
+		frame_msec = 200;
+	}
+	old_look_frameTime = com_frameTime;
+
 	// keyboard angle adjustment
-	// Changed in MoH Arena: with cl_cmdfps on, CL_ApplyRenderLook does it every frame
-	if ( !cl_cmdfps->integer ) {
-		CL_AdjustAngles ();
-	}
+	CL_AdjustAngles ();
 
-	Com_Memset( &cmd, 0, sizeof( cmd ) );
-
-	CL_CmdButtons( &cmd );
-
-	// get basic movement from keyboard
-	CL_KeyMove( &cmd );
-
-	if ( !cl_cmdfps->integer ) {
-		// get basic movement from mouse
-		CL_MouseMove( &cmd );
-	} else {
-		// Changed in Omaha: mouse look ran per render frame (CL_ApplyRenderLook); add its strafe
-		cmd.buttons |= cl.mouseCmd.buttons;
-		cmd.rightmove = ClampChar( cmd.rightmove + (int)cl.mouseStrafe[0] );
-		cmd.forwardmove = ClampChar( cmd.forwardmove + (int)cl.mouseStrafe[1] );
-	}
-	cl.mouseCmd.buttons = 0;
-	cl.mouseStrafe[0] = cl.mouseStrafe[1] = 0;
+	// get basic movement from mouse
+	CL_MouseLook();
 
 	// get basic movement from joystick
-	CL_JoystickMove( &cmd );
+	CL_JoystickLook();
 
-	if ( !cl_cmdfps->integer ) {
-		// check to make sure the angles haven't wrapped
-		if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
-			cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
-		} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
-			cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
-		}
+	frame_msec = cmdMsec;
+
+	// check to make sure the angles haven't wrapped
+	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
+		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
+	} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
+		cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
 	}
-
-	// store out the final values
-	CL_FinishMove( &cmd );
-
-	// Added in MoH Arena
-	//  The round countdown holds movement; the view stays free.
-	MoHArena_HoldMovement( &cmd );
 
 	// draw debug graphs of turning for mouse testing
 	if ( cl_debugMove->integer ) {
@@ -938,34 +966,157 @@ usercmd_t CL_CreateCmd( void ) {
 			SCR_DebugGraph( fabs(cl.viewangles[PITCH] - oldAngles[PITCH]) );
 		}
 	}
+}
+
+/*
+=================
+CL_CreateCmd
+=================
+*/
+usercmd_t CL_CreateCmd( void ) {
+	usercmd_t	cmd;
+
+	Com_Memset( &cmd, 0, sizeof( cmd ) );
+
+	CL_CmdButtons( &cmd );
+
+	// get basic movement from keyboard
+	CL_KeyMove( &cmd );
+
+	// what the mouse added since the last cmd (CL_ApplyLook)
+	cmd.buttons |= cl.lookButtons;
+	cmd.rightmove = ClampChar( cmd.rightmove + cl.lookMove[0] );
+	cmd.forwardmove = ClampChar( cmd.forwardmove + cl.lookMove[1] );
+	cl.lookButtons = 0;
+	cl.lookMove[0] = cl.lookMove[1] = 0;
+
+	// get basic movement from joystick
+	CL_JoystickMove( &cmd );
+
+	// store out the final values
+	CL_FinishMove( &cmd );
+
+	// Added in MoH Arena
+	//  The round countdown holds movement; the view stays free.
+	MoHArena_HoldMovement( &cmd );
 
 	return cmd;
 }
 
 
+// the sub-grid (cl_movesubgrid, CL_SubGridStep)
+static struct {
+	int			step;		// to the next usercmd when not the interval: the half to an early one, the rest after it
+	qboolean	early;		// the next usercmd is an early one
+	qboolean	send;		// the newest usercmds started with a short step: their packet goes at once
+	qboolean	upHeld;		// the jump key held at the newest usercmd
+	int			prevNow;	// the server time of the frame before
+} cmd_sub;
+
+/*
+=================
+CL_SubGridStep
+
+cl_movesubgrid: the step from the newest usercmd to the next one, called in
+every frame of cl_movefps before its usercmds. A fire click (attack primary
+or secondary) or a jump seen in the first half of a step takes the next
+usercmd to the half step (the newest one's time + half the interval: 5 ms at
+100, 4 at 125), made by the first frame there, so the server gets the shot or
+the jump up to half a step sooner, and the grid goes on from its own points:
+that step is split in two (CL_CreateNewCommands). It is early when the
+frame before was still before the half point (the click or the key came
+after that frame's input read). A jump's share of its usercmd counts from
+its key event's time, the frame before's input read (IN_Frame, CL_KeyState),
+so only an early usercmd made now in that same millisecond would carry none
+of it: that one waits for the grid. One early usercmd a step; one still to
+come when a frame is at the grid's point is dropped: the grid's usercmd
+takes the event. Use and the movement keys stay on the grid. notuern's
+idea, as on the metal branch.
+=================
+*/
+static int CL_SubGridStep( int interval, int elapsed ) {
+	int		half = interval / 2;
+	int		before = cmd_sub.prevNow - ( cl.serverTime - elapsed );	// the frame before's elapsed
+	int		seen = half;
+
+	cmd_sub.prevNow = cl.serverTime;
+	if ( cmd_sub.early && elapsed >= interval ) {
+		cmd_sub.step = 0;
+		cmd_sub.early = qfalse;
+	}
+	if ( !cmd_sub.step && elapsed < interval && cl_movesubgrid->integer > 0 ) {
+		if ( in_buttons[0].wasPressed || in_buttons[1].wasPressed ) {
+			seen = before;
+		} else if ( !cmd_sub.upHeld && ( in_up.active || in_up.msec ) ) {
+			seen = elapsed >= half && in_up.active && in_up.downtime == (unsigned)com_frameTime ? half : before;
+		}
+		if ( seen < half ) {
+			cmd_sub.step = half;
+			cmd_sub.early = qtrue;
+		}
+	}
+	return cmd_sub.step ? cmd_sub.step : interval;
+}
+
 /*
 =================
 CL_CreateNewCommands
 
-Create a new usercmd_t structure for this frame
+Create the usercmds of this frame. In the game they come at a fixed rate,
+whatever the frame rate: one every 1000 / cl_movefps whole milliseconds of
+server time (85 to 125 a second; 1000 / 85 is 11 ms, 1000 / 125 is 8), so that
+every pmove step has that length, at 144 frames a second as at 250 or 2000,
+also when the server time drifts (CL_AdjustTimeDelta). A frame that passes
+none makes none (the view still turns, CL_ApplyLook), a frame longer than
+the step makes several, with the same input (up to 100 ms of them). A shot
+or a jump can split a step in two (cl_movesubgrid, CL_SubGridStep).
+cl_movefps 0 is stock: one per frame, each step as long as its frame.
 =================
 */
 void CL_CreateNewCommands( void ) {
-	usercmd_t	*cmd;
-	int			cmdNum;
+	usercmd_t	cmd;
+	int			interval, elapsed, step, cmdTime, count, i;
+	qboolean	upNow;
+
+	// before the first snapshot cl.serverTime doesn't run, and cl_movefps 0
+	// is stock: one per frame
+	interval = clc.state == CA_ACTIVE ? CL_MoveInterval() : 0;
+	step = interval;
+	if ( !interval ) {
+		Com_Memset( &cmd_sub, 0, sizeof( cmd_sub ) );
+		cmd_sub.prevNow = cl.serverTime;
+	}
 
 	// no need to create usercmds until we have a gamestate
 	if ( clc.state < CA_PRIMED ) {
 		return;
 	}
 
-	// Added in Omaha: wait for 1000/cl_cmdfps ms of serverTime (a stalled clock while
-	// connecting must not block cmds; unsigned also passes a backwards map_restart)
-	// Changed in MoH Arena: only when cl_cmdfps is on (0, the default, is the original rate)
-	if ( cl_cmdfps->integer && clc.state == CA_ACTIVE && (unsigned)( cl.serverTime - cl.cmds[cl.cmdNumber & CMD_MASK].serverTime )
-			< (unsigned)( 1000 / Com_Clamp( 85, 125, cl_cmdfps->integer ) ) ) {
-		return;
+	count = 1;
+	cmdTime = cl.serverTime;
+	if ( interval ) {
+		elapsed = cl.serverTime - cl.cmds[cl.cmdNumber & CMD_MASK].serverTime;
+		// else the first one, or the time went back (map_restart) or jumped
+		// (a hitch, or under 10 frames a second: one step of all of it, as
+		// before, so that a packet with the last one's usercmds
+		// (cl_packetdup) stays within MAX_PACKET_USERCMDS): from now on
+		if ( elapsed >= 0 && elapsed <= 100 ) {
+			step = CL_SubGridStep( interval, elapsed );
+			if ( elapsed < step ) {
+				return;
+			}
+			count = 1 + ( elapsed - step ) / interval;
+			cmdTime = cl.cmds[cl.cmdNumber & CMD_MASK].serverTime + step;
+		} else {
+			cmd_sub.step = 0;
+			cmd_sub.early = qfalse;
+			cmd_sub.prevNow = cl.serverTime;
+		}
 	}
+
+	// a jump pressed in this millisecond has no share of its usercmd
+	// (CL_KeyState), so it is still a starting event after it (CL_SubGridStep)
+	upNow = in_up.active && in_up.downtime == (unsigned)com_frameTime;
 
 	frame_msec = com_frameTime - old_com_frameTime;
 
@@ -982,12 +1133,186 @@ void CL_CreateNewCommands( void ) {
 	}
 	old_com_frameTime = com_frameTime;
 
+	// generate the commands for this frame
+	cmd = CL_CreateCmd ();
+	for ( i = 0; i < count; i++ ) {
+		if ( i ) {
+			// the weapon command goes into a set number of usercmds
+			// (CG_WeaponCommandButtonBits)
+			cmd.buttons &= ~GetWeaponCommandMask( WEAPON_COMMAND_MAX_VER17 );
+			if ( cge ) {
+				cmd.buttons |= cge->CG_WeaponCommandButtonBits();
+			}
+		}
+		cmd.serverTime = cmdTime + i * interval;
+		cl.cmdNumber++;
+		cl.cmds[cl.cmdNumber & CMD_MASK] = cmd;
+	}
 
-	// generate a command for this frame
-	cl.cmdNumber++;
-	cmdNum = cl.cmdNumber & CMD_MASK;
-	cl.cmds[cmdNum] = CL_CreateCmd ();
-	cmd = &cl.cmds[cmdNum];
+	// the sub-grid: after an early usercmd the rest of the step, back to the
+	// grid's point; the packet of a short step goes at once
+	if ( interval ) {
+		cmd_sub.send = step < interval;
+		cmd_sub.step = cmd_sub.early ? interval - interval / 2 : 0;
+		cmd_sub.early = qfalse;
+		cmd_sub.upHeld = in_up.active && !upNow;
+	}
+}
+
+/*
+=================
+CL_GetViewUserCmd
+
+The newest usercmd with the view angles of this frame, for cgame to turn the
+view in the frames between usercmds (CL_ApplyLook). Prediction runs the
+usercmds as they were made, the angles they were sent with.
+=================
+*/
+void CL_GetViewUserCmd( usercmd_t *ucmd ) {
+	int		i;
+
+	*ucmd = cl.cmds[cl.cmdNumber & CMD_MASK];
+	for ( i = 0; i < 3; i++ ) {
+		ucmd->angles[i] = ANGLE2SHORT( cl.viewangles[i] );
+	}
+}
+
+/*
+=================
+CL_LiveKeyFraction
+
+The share of this cl_movefps interval CL_KeyMove will store if the key stays
+as it is until the command is sealed. Does not touch key->msec or downtime
+(CL_KeyState does, and the real command still needs them).
+
+projectHold counts the rest of the interval while the key is down. Turn
+keys are sampled by CL_AdjustAngles earlier in this frame, so the sealed
+command gets about none of them; projecting those would move the picture
+and the replay would take it back.
+=================
+*/
+static float CL_LiveKeyFraction( const kbutton_t *key, int interval, int elapsed, qboolean projectHold ) {
+	int		msec, remain;
+
+	if ( interval < 1 ) {
+		interval = 1;
+	}
+	remain = interval - elapsed;
+	if ( remain < 0 ) {
+		remain = 0;
+	}
+
+	msec = (int)key->msec;
+	if ( key->active ) {
+		if ( !key->downtime ) {
+			msec = interval;
+		} else {
+			msec += (int)( com_frameTime - key->downtime );
+		}
+		if ( msec < 0 ) {
+			msec = 0;
+		}
+		if ( projectHold ) {
+			msec += remain;
+		}
+	}
+
+	if ( msec < 0 ) {
+		msec = 0;
+	}
+	if ( msec > interval ) {
+		msec = interval;
+	}
+
+	return (float)msec / (float)interval;
+}
+
+/*
+=================
+CL_GetLiveUserCmd
+
+The next usercmd as it goes out if the keys stay as they are: this frame's
+view, the moves for its step (the interval, or the sub-grid's,
+CL_SubGridStep) and its time. The open interval is one stock Pmove of that
+command. Nothing is written into cl.cmds. At cl_movefps 0 there is no open
+interval (every frame makes its usercmd): the newest one with this frame's
+view.
+=================
+*/
+void CL_GetLiveUserCmd( usercmd_t *ucmd ) {
+	int			i, interval, elapsed, movespeed;
+	int			forward, side, up;
+	unsigned	weapon;
+
+	interval = CL_MoveInterval();
+	if ( !interval ) {
+		CL_GetViewUserCmd( ucmd );
+		return;
+	}
+	if ( cmd_sub.step ) {
+		interval = cmd_sub.step;	// the sub-grid's step
+	}
+
+	*ucmd = cl.cmds[cl.cmdNumber & CMD_MASK];
+
+	elapsed = cl.serverTime - ucmd->serverTime;
+	if ( elapsed < 0 ) {
+		elapsed = 0;
+	}
+	if ( elapsed > interval ) {
+		elapsed = interval;
+	}
+
+	movespeed = 127;
+	forward = 0;
+	side = 0;
+	up = 0;
+	if ( in_strafe.active ) {
+		side += movespeed * CL_LiveKeyFraction( &in_right, interval, elapsed, qfalse );
+		side -= movespeed * CL_LiveKeyFraction( &in_left, interval, elapsed, qfalse );
+	}
+	side += movespeed * CL_LiveKeyFraction( &in_moveright, interval, elapsed, qtrue );
+	side -= movespeed * CL_LiveKeyFraction( &in_moveleft, interval, elapsed, qtrue );
+	up += movespeed * CL_LiveKeyFraction( &in_up, interval, elapsed, qtrue );
+	up -= movespeed * CL_LiveKeyFraction( &in_down, interval, elapsed, qtrue );
+	forward += movespeed * CL_LiveKeyFraction( &in_forward, interval, elapsed, qtrue );
+	forward -= movespeed * CL_LiveKeyFraction( &in_back, interval, elapsed, qtrue );
+
+	ucmd->forwardmove = ClampChar( forward );
+	ucmd->rightmove = ClampChar( side );
+	ucmd->upmove = ClampChar( up );
+
+	ucmd->rightmove = ClampChar( ucmd->rightmove + (int)cl.lookMove[0] );
+	ucmd->forwardmove = ClampChar( ucmd->forwardmove + (int)cl.lookMove[1] );
+
+	weapon = ucmd->buttons & GetWeaponCommandMask( WEAPON_COMMAND_MAX_VER17 );
+	ucmd->buttons = weapon;
+	for ( i = 0; i < 15; i++ ) {
+		if ( in_buttons[i].active || in_buttons[i].wasPressed ) {
+			ucmd->buttons |= 1 << i;
+		}
+	}
+	ucmd->buttons |= weapon;
+
+	if ( UI_MenuActive() || UI_ConsoleIsOpen() ) {
+		ucmd->buttons |= BUTTON_TALK;
+	}
+	if ( in_speed.active ^ cl_run->integer ) {
+		ucmd->buttons |= BUTTON_RUN;
+	}
+	if ( anykeydown && Key_GetCatcher() == 0 ) {
+		ucmd->buttons |= BUTTON_MOUSE;
+	}
+	if ( anykeydown || cl.lookButtons ) {
+		ucmd->buttons |= BUTTON_ANY;
+	}
+
+	CL_JoystickMove( ucmd );
+
+	for ( i = 0; i < 3; i++ ) {
+		ucmd->angles[i] = ANGLE2SHORT( cl.viewangles[i] );
+	}
+	ucmd->serverTime += interval;
 }
 
 /*
@@ -1081,7 +1406,27 @@ qboolean CL_ReadyToSendPacket( void ) {
 		Cvar_Set( "cl_maxpackets", "125" );
 	}
 	oldPacketNum = (clc.netchan.outgoingSequence - 1) & PACKET_MASK;
-	delta = cls.realtime -  cl.outPackets[ oldPacketNum ].p_realtime;
+
+	// the sub-grid's usercmds (cl_movesubgrid) go at once: cl_maxpackets
+	// would hold one made half a step after the packet before
+	if ( cmd_sub.send && cl.cmdNumber != cl.outPackets[ oldPacketNum ].p_cmdNumber ) {
+		return qtrue;
+	}
+
+	// cl_movefps: a new usercmd waits by the usercmds' own time, the grid's
+	// (as on the metal branch). Counted in real time, the time delta's
+	// corrections bring two of them closer than their step now and then, or
+	// the frames do (7 ms apart at 144 frames a second), and the packet
+	// waited a frame. A grid started again (the time went back) sends at
+	// once; a packet without a new usercmd counts real time as before
+	if ( clc.state == CA_ACTIVE && CL_MoveInterval() && cl.cmdNumber != cl.outPackets[ oldPacketNum ].p_cmdNumber ) {
+		delta = cl.cmds[ cl.cmdNumber & CMD_MASK ].serverTime - cl.outPackets[ oldPacketNum ].p_serverTime;
+		if ( delta < 0 ) {
+			return qtrue;
+		}
+	} else {
+		delta = cls.realtime - cl.outPackets[ oldPacketNum ].p_realtime;
+	}
 	if ( delta < 1000 / cl_maxpackets->integer ) {
 		// the accumulated commands will go out in the next packet
 		return qfalse;
@@ -1278,89 +1623,12 @@ void CL_WritePacket( void ) {
 
 /*
 =================
-CL_ApplyRenderLook
-
-Added in Omaha: keyboard / mouse look every render frame, written into the newest
-usercmd so prediction tracks it between cl_cmdfps ticks.
-=================
-*/
-static void CL_ApplyRenderLook( void ) {
-	const unsigned savedFrameMsec = frame_msec;
-	vec3_t         oldAngles;
-	int            i;
-
-	VectorCopy( cl.viewangles, oldAngles );
-	frame_msec = (unsigned)Com_Clamp( 1, 200, cls.frametime );
-	CL_AdjustAngles();
-	CL_MouseMove( &cl.mouseCmd );
-	frame_msec = savedFrameMsec;
-
-	// check to make sure the angles haven't wrapped
-	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
-	} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
-	}
-
-	for ( i = 0; i < 3; i++ ) {
-		cl.cmds[cl.cmdNumber & CMD_MASK].angles[i] = ANGLE2SHORT( cl.viewangles[i] );
-	}
-}
-
-/*
-=================
-CL_ApplyLateMouse
-
-Added in Omaha: mouse look only (no CL_AdjustAngles — that already ran this frame).
-Called after a late SDL pump just before CG_DrawActiveFrame so the view uses the
-freshest deltas. When cl_lowLatencyInput is on, CL_MouseMove skips m_filter (raw deltas).
-=================
-*/
-void CL_ApplyLateMouse( void ) {
-	const unsigned savedFrameMsec = frame_msec;
-	vec3_t         oldAngles;
-	int            i;
-
-	if ( !cl_lowLatencyInput || !cl_lowLatencyInput->integer ) {
-		return;
-	}
-	if ( clc.state < CA_PRIMED || paused->integer ) {
-		return;
-	}
-
-	VectorCopy( cl.viewangles, oldAngles );
-	frame_msec = (unsigned)Com_Clamp( 1, 200, cls.frametime );
-	CL_MouseMove( &cl.mouseCmd );
-	frame_msec = savedFrameMsec;
-
-	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
-	} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
-	}
-
-	for ( i = 0; i < 3; i++ ) {
-		const short a = ANGLE2SHORT( cl.viewangles[i] );
-		cl.cmds[cl.cmdNumber & CMD_MASK].angles[i] = a;
-		cl.predictCmd.angles[i] = a;
-	}
-
-	cl_keepLatches        = qtrue;
-	cl.predictCmd.buttons = 0;
-	CL_CmdButtons( &cl.predictCmd );
-	cl_keepLatches = qfalse;
-}
-
-/*
-=================
 CL_SendCmd
 
 Called every frame to builds and sends a command packet to the server.
 =================
 */
 void CL_SendCmd( void ) {
-	int oldCmdNumber;
-
 	// don't send any message if not connected
 	if ( clc.state < CA_CONNECTED ) {
 		return;
@@ -1371,28 +1639,20 @@ void CL_SendCmd( void ) {
 		return;
 	}
 
-	// Changed in MoH Arena: only with cl_cmdfps on
-	if ( cl_cmdfps->integer && clc.state >= CA_PRIMED ) {
-		CL_ApplyRenderLook();
+	// the view turns every frame, usercmds come at cl_movefps (every frame at 0)
+	if ( clc.state >= CA_PRIMED ) {
+		CL_ApplyLook();
 	}
-	oldCmdNumber = cl.cmdNumber;
 
 	// we create commands even if a demo is playing,
 	CL_CreateNewCommands();
 
-	// Added in Omaha: no new usercmd yet; resample keys into a prediction-only copy of
-	// the newest one, and skip the duplicate packet unless reliable commands wait
-	cl.predictCmd = cl.cmds[cl.cmdNumber & CMD_MASK];
-	if ( cl_cmdfps->integer && cl.cmdNumber == oldCmdNumber && clc.state >= CA_PRIMED ) {
-		cl_keepLatches        = qtrue;
-		cl.predictCmd.buttons = 0;
-		CL_CmdButtons( &cl.predictCmd );
-		CL_KeyMove( &cl.predictCmd );
-		cl_keepLatches = qfalse;
-
-		if ( clc.state == CA_ACTIVE && clc.reliableSequence <= clc.reliableAcknowledge ) {
-			return;
-		}
+	// nothing new for the server: no usercmd since the last packet and no
+	// reliable command waiting
+	if ( clc.state == CA_ACTIVE
+		&& cl.cmdNumber == cl.outPackets[ ( clc.netchan.outgoingSequence - 1 ) & PACKET_MASK ].p_cmdNumber
+		&& clc.reliableSequence <= clc.reliableAcknowledge ) {
+		return;
 	}
 
 	// don't send a packet if the last packet was sent too recently
@@ -1490,11 +1750,9 @@ void CL_InitInput( void ) {
 
 	cl_nodelta = Cvar_Get ("cl_nodelta", "0", 0);
 	cl_debugMove = Cvar_Get ("cl_debugMove", "0", 0);
-	// Changed in MoH Arena: off by default (the original rate, one usercmd per frame);
-	//  any other value is held to 85..125 so commands never reach the 333 fps physics
-	cl_cmdfps = Cvar_Get ("cl_cmdfps", "0", CVAR_ARCHIVE);
-	// Added in Omaha: late mouse before cgame view
-	cl_lowLatencyInput = Cvar_Get( "cl_lowLatencyInput", "0", CVAR_ARCHIVE );
+	cl_movefps = Cvar_Get ("cl_movefps", "100", CVAR_ARCHIVE);
+	cl_movesubgrid = Cvar_Get ("cl_movesubgrid", "1", CVAR_ARCHIVE);
+	cl_nullbinds = Cvar_Get ("cl_nullbinds", "0", CVAR_ARCHIVE);
 }
 
 /*

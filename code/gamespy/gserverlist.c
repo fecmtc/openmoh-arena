@@ -23,16 +23,19 @@ Fax(714)549-0757
 /**
  * The following modifications were made:
  *
- * 1) Non-blocking server list sockets. List requests are asynchronous and won't block the game. The only blocking request could be due to DNS resolution.
- * 2) Server list sockets will timeout after 10 seconds of no reply.
+ * 1) Non-blocking server list sockets. List requests are asynchronous and won't block the game.
+ * 2) Server list sockets will timeout after 10 seconds of no reply, 3 seconds before the master's first reply.
  * 3) Parallel server list requests.
- *  3.1) A pool of sockets is initially created
- *  3.2) The server list connects idling sockets to available masters, afterwards the server list state is set to `sl_listxfer`.
- *  3.3) The server list sends the list request to connected masters, and receives the data for each.
- *  3.4) When finished fetching 1 master (got `\final`), the server list state transitions to `sl_querying`.
- *  3.5) The server list queries all fetched servers. It can still continue fetching list from currently connected masters
- *       but it will not connect to other masters while servers are being queried. It won't be sending more queries if remaining masters replied in under 500 ms.
- *  3.6) When finished querying all fetched servers, the server list restarts from 3.2 and queries next masters.
+ *  3.1) One socket per master. A refresh resolves every master's name on a thread of its own
+ *       (gsiStartResolvingHostname: a lookup that isn't cached blocks for tens to hundreds of
+ *       milliseconds) and connects each as soon as its address is known; a master that can't be
+ *       resolved or connected is skipped.
+ *  3.2) The server list sends the list request to connected masters, and receives the data for each.
+ *  3.3) Servers are queried as soon as a master lists them (`sl_querying`), while the masters still send:
+ *       servers listed by several masters are queried once.
+ *  3.4) A query that gets no answer in QUERY_TIMEOUT is sent once more, after the first queries of all
+ *       servers, and given QUERY_RETRY_TIMEOUT.
+ *  3.5) The list is idle again when every master has finished and every server has answered or timed out.
  *
  * The idea here is to ensure the redundancy of the server list between multiple masters even if the results are combined.
  * Optionally for best results, the game should return a list of masters from the same community.
@@ -83,8 +86,10 @@ extern int ServerListGetMsPort(int index);
 #define MAX_INFO_FIELDS 20
 
 // Multi-master settings
-#define SERVER_QUERY_MAX_PAUSE 500
 #define INTERNET_SEARCH_TIME 10000 //10 sec
+#define MASTER_CONNECT_TIME 3000 // to connect and send the challenge, else the master is skipped
+#define QUERY_TIMEOUT 400 // the first query of a server
+#define QUERY_RETRY_TIMEOUT 1000 // the second, sent after the first queries of all servers
 
 #ifdef __cplusplus
 extern "C" {
@@ -101,12 +106,14 @@ typedef struct
 } UpdateInfo;
 
 typedef enum { pi_fieldcount, pi_fields, pi_servers } GParseInfoState;
-typedef enum { ls_none, ls_connecting, ls_connected } GListSocketState;
+typedef enum { ls_none, ls_resolving, ls_connecting, ls_connected } GListSocketState;
 
 typedef struct GServerListSocketImplementation
 {
     SOCKET s;
     GListSocketState socketstate;
+    GSIResolveHostnameHandle resolve; // ls_resolving: the master's name
+    unsigned short port;
     char data[2048];
     int oldlen;
     gsi_time lastreplytime;
@@ -124,7 +131,6 @@ struct GServerListImplementation
     char enginename[32];
     char filter[256];
     int maxupdates;
-    int nextupdate;
     int abortupdate;
     ListCallBackFn CallBackFn;
     void *instance;
@@ -132,8 +138,6 @@ struct GServerListImplementation
     gbool sortascending;
     GServerListSocket slsockets;
     int numslsockets;
-    unsigned int startslindex;
-    gsi_time lastsltime;
     unsigned long lanstarttime;
     GQueryType querytype;
     HashTable keylist;
@@ -149,15 +153,7 @@ struct GServerListImplementation
     GParseInfoState pistate;
 
     gbool updateinitialized;
-    gbool pipelinequeries;
-    gbool retryqueries;
-    unsigned long firstquerytimeout;
-    unsigned long retryquerytimeout;
     GServerListScheduler scheduler;
-
-    // Added in MoH Arena: set by ServerListUseScheduler. A list that never asked for it
-    // runs the original code
-    gbool usescheduler;
 };
 
 GServerList g_sortserverlist; //global serverlist for sorting info!!
@@ -187,11 +183,13 @@ Creates and returns a new (empty) GServerList. */
 GServerList	ServerListNew(const char *gamename, const char *enginename, const char *seckey, int maxconcupdates, void *CallBackFn, int CallBackFnType, void *instance)
 {
     GServerList list;
+    int i;
 
     list = (GServerList) gsimalloc(sizeof(struct GServerListImplementation));
     assert(list != NULL);
     list->state = sl_idle;
     list->servers = ArrayNew(sizeof(GServer), SERVER_GROWBY, ServerFree);
+    list->retryservers = ArrayNew(sizeof(GServer), SERVER_GROWBY, NULL);
     list->keylist = TableNew2(sizeof(char *),LIST_NUMKEYBUCKETS,LIST_NUMKEYCHAINS,GStringHash, GCaseInsensitiveCompare, GStringFree);
     list->maxupdates = maxconcupdates;
     list->updatelist = gsimalloc(maxconcupdates * sizeof(UpdateInfo));
@@ -210,29 +208,19 @@ GServerList	ServerListNew(const char *gamename, const char *enginename, const ch
     list->encryptdata = 1;
     list->async = 0;
 
-    // Added in MoH Arena: a new list runs the original code. ServerListUseScheduler
-    // turns Omaha's engine on for it.
-    list->usescheduler = 0;
-    list->retryservers = NULL;
-
     list->updateinitialized = 0;
-    list->pipelinequeries = 0;
-    list->retryqueries = 0;
-    list->firstquerytimeout = SERVER_TIMEOUT;
-    list->retryquerytimeout = SERVER_TIMEOUT;
     GServerListSchedulerInit(&list->scheduler);
 
-    list->numslsockets = maxconcupdates / 4;
+    // one socket per master (the first one is also the LAN broadcast socket)
+    list->numslsockets = ServerListGetNumMasters();
     if (list->numslsockets < 1) {
         list->numslsockets = 1;
-    } else if (list->numslsockets > 4) {
-        // Above 4 seems too much
-        list->numslsockets = 4;
     }
     list->slsockets = (GServerListSocket)gsimalloc(sizeof(struct GServerListSocketImplementation) * list->numslsockets);
     memset(list->slsockets, 0, sizeof(struct GServerListSocketImplementation) * list->numslsockets);
-    list->startslindex = 0;
-    list->lastsltime = current_time();
+    for (i = 0; i < list->numslsockets; i++) {
+        list->slsockets[i].s = INVALID_SOCKET;
+    }
 
     SocketStartUp();
     return list;	
@@ -243,21 +231,16 @@ GServerList	ServerListNew(const char *gamename, const char *enginename, const ch
 Free a GServerList and all internal sturctures and servers */
 void ServerListFree(GServerList serverlist)
 {
-    // Added in MoH Arena: a list that uses the scheduler closes its sockets and frees its
-    // retry list first (Omaha's fix). The original code leaves them as they are.
-    if (serverlist->usescheduler) {
-        int i;
+    int i;
 
-        FreeUpdateList(serverlist);
-        for (i = 0; i < serverlist->numslsockets; i++) {
-            if (serverlist->slsockets[i].s != INVALID_SOCKET) {
-                closesocket(serverlist->slsockets[i].s);
-                serverlist->slsockets[i].s = INVALID_SOCKET;
-            }
+    FreeUpdateList(serverlist);
+    for (i = 0; i < serverlist->numslsockets; i++) {
+        if (serverlist->slsockets[i].s != INVALID_SOCKET) {
+            closesocket(serverlist->slsockets[i].s);
+            serverlist->slsockets[i].s = INVALID_SOCKET;
         }
-        ArrayFree(serverlist->retryservers);
     }
-
+    ArrayFree(serverlist->retryservers);
     ArrayFree(serverlist->servers);
     TableFree(serverlist->keylist);
     gsifree(serverlist->updatelist);
@@ -267,8 +250,8 @@ void ServerListFree(GServerList serverlist)
     SocketShutDown();
 }
 
-// Added in MoH Arena: Omaha's InitUpdateList, for a list that uses the scheduler
-static GError InitUpdateListScheduled(GServerList serverlist)
+ //create update sockets and init structures
+static GError InitUpdateList(GServerList serverlist)
 {
     int i;
 
@@ -296,36 +279,8 @@ static GError InitUpdateListScheduled(GServerList serverlist)
 
 }
 
- //create update sockets and init structures
-static GError InitUpdateList(GServerList serverlist)
-{
-    int i;
-
-    // Added in MoH Arena: a list that uses the scheduler takes Omaha's version
-    if (serverlist->usescheduler) {
-        return InitUpdateListScheduled(serverlist);
-    }
-
-    for (i = 0 ; i < serverlist->maxupdates ; i++)
-    {
-        serverlist->updatelist[i].s = socket(AF_INET, SOCK_DGRAM,IPPROTO_UDP);
-        if (serverlist->updatelist[i].s == INVALID_SOCKET)
-        { //ran out of sockets, just cap maxupdates here, unless we don't have any
-            if (i == 0)
-                return GE_NOSOCKET;
-            serverlist->maxupdates = i;
-            return 0;
-        }
-        serverlist->updatelist[i].currentserver = NULL;
-        serverlist->updatelist[i].starttime = 0;
-    }
-    return 0;
-
-
-}
-
-// Added in MoH Arena: Omaha's FreeUpdateList, for a list that uses the scheduler
-static GError FreeUpdateListScheduled(GServerList serverlist)
+//gsifree update sockets 
+static GError FreeUpdateList(GServerList serverlist) 
 {
     int i;
 
@@ -347,71 +302,26 @@ static GError FreeUpdateListScheduled(GServerList serverlist)
 
 }
 
-//gsifree update sockets 
-static GError FreeUpdateList(GServerList serverlist) 
-{
-    int i;
-
-    // Added in MoH Arena: a list that uses the scheduler takes Omaha's version
-    if (serverlist->usescheduler) {
-        return FreeUpdateListScheduled(serverlist);
-    }
-
-    for (i = 0 ; i < serverlist->maxupdates ; i++)
-    {
-        closesocket(serverlist->updatelist[i].s);
-    }
-    return 0;
-
-
-}
-
-//create and connect a server list socket
-static GError CreateServerListSocket(GServerList serverlist, GServerListSocket slsocket, gbool async)
+//create and connect a server list socket to a master's address; on a failure it stays free
+//(ls_none): the master is skipped
+static GError CreateServerListSocket(GServerList serverlist, GServerListSocket slsocket, unsigned int ip)
 {
     struct   sockaddr_in saddr;
-    struct hostent *hent;
     int lasterr;
-    int port;
-    const char *host;
-
-    if (serverlist->startslindex >= ServerListGetNumMasters()) {
-        return GE_NODNS;
-    }
-
-    if (slsocket->socketstate != ls_none) {
-        closesocket(slsocket->s);
-        slsocket->s = INVALID_SOCKET;
-    }
-
-    port = ServerListGetMsPort(serverlist->startslindex);
-    host = ServerListGetHost(serverlist->startslindex);
-    // Added in MoH Arena: a list that uses the scheduler moves on to the next master here,
-    // so a master that cannot be reached is not tried again (Omaha's fix)
-    if (serverlist->usescheduler) {
-        serverlist->startslindex++;
-    }
 
     saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(port);
-    saddr.sin_addr.s_addr = inet_addr(host);
-    if (saddr.sin_addr.s_addr == INADDR_NONE)
-    {
-        hent = gethostbyname(host);
-        if (!hent)
-            return GE_NODNS; 
-        saddr.sin_addr.s_addr = *(u_long *)hent->h_addr_list[0];
-    }
+    saddr.sin_port = htons(slsocket->port);
+    saddr.sin_addr.s_addr = ip;
     slsocket->s = socket ( AF_INET, SOCK_STREAM, IPPROTO_TCP );
     if (slsocket->s == INVALID_SOCKET)
         return GE_NOSOCKET;
 
-    if (async) {
+    if (serverlist->async) {
         SetSockBlocking(slsocket->s, 0);
     }
 
     if (connect ( slsocket->s, (struct sockaddr *) &saddr, sizeof saddr ) != 0
-        && (lasterr = GOAGetLastError(slsocket->slsocket), lasterr != WSAEWOULDBLOCK && lasterr != WSAEINPROGRESS))
+        && (lasterr = GOAGetLastError(slsocket->s), lasterr != WSAEWOULDBLOCK && lasterr != WSAEINPROGRESS))
     {
         closesocket(slsocket->s);
         slsocket->s = INVALID_SOCKET;
@@ -422,10 +332,6 @@ static GError CreateServerListSocket(GServerList serverlist, GServerListSocket s
     slsocket->oldlen = 0;
     slsocket->cryptkey.index = -1; //mark as uninitialized
     slsocket->lastreplytime = current_time();
-    // Changed in MoH Arena: a list that uses the scheduler has already moved on (see above)
-    if (!serverlist->usescheduler) {
-        serverlist->startslindex++;
-    }
 
     //else we are connected
     return 0;
@@ -433,164 +339,35 @@ static GError CreateServerListSocket(GServerList serverlist, GServerListSocket s
 
 }
 
-//create and connect a server list sockets
-static GError CreateServerListForAvailableSockets(GServerList serverlist, gbool async)
+//start every master: an address at once, a name once a thread resolved it (ServerListThinkSocket);
+//a name that can't be resolved, or no thread for it, skips the master
+static void ServerListStartMasters(GServerList serverlist)
 {
-    int i;
+    GServerListSocket slsocket;
+    unsigned int ip;
+    unsigned int i;
 
-    for(i = 0; i < serverlist->numslsockets; i++) {
-        if (serverlist->slsockets[i].socketstate == ls_none) {
-            CreateServerListSocket(serverlist, &serverlist->slsockets[i], async);
+    for (i = 0; i < ServerListGetNumMasters() && i < (unsigned int)serverlist->numslsockets; i++) {
+        const char *host = ServerListGetHost(i);
+
+        slsocket = &serverlist->slsockets[i];
+        slsocket->port = ServerListGetMsPort(i);
+        ip = inet_addr(host);
+        if (ip != INADDR_NONE) {
+            CreateServerListSocket(serverlist, slsocket, ip);
+        } else if (gsiStartResolvingHostname(host, &slsocket->resolve) == 0) {
+            slsocket->socketstate = ls_resolving;
         }
     }
-
-    return 0;
 }
 
-// Added in MoH Arena: turns Omaha's query engine on for this list: the scheduler with its
-// retries and pipelining, Omaha's socket handling and the extra LIST_* messages. A list that
-// never asks for it runs the original code. Call it right after ServerListNew.
-GError ServerListUseScheduler(GServerList serverlist)
+/* ServerListGetQueryStats
+-------------------------
+The servers of the current (or last) update that answered and that timed out */
+void ServerListGetQueryStats(GServerList serverlist, int *responsive, int *timedout)
 {
-    int i;
-
-    if (serverlist->state != sl_idle) {
-        return GE_BUSY;
-    }
-
-    if (serverlist->usescheduler) {
-        return GE_NOERROR;
-    }
-
-    serverlist->retryservers = ArrayNew(sizeof(GServer), SERVER_GROWBY, NULL);
-    // the original code leaves a master socket that was never opened at 0; Omaha's engine
-    // expects INVALID_SOCKET there
-    for (i = 0; i < serverlist->numslsockets; i++) {
-        serverlist->slsockets[i].s = INVALID_SOCKET;
-    }
-    serverlist->usescheduler = 1;
-    return GE_NOERROR;
-}
-
-GError ServerListSetMasterConcurrency(GServerList serverlist, int maxmasters)
-{
-    int available;
-    int i;
-    GServerListSocket newsockets;
-
-    if (serverlist->state != sl_idle) {
-        return GE_BUSY;
-    }
-
-    // Added in MoH Arena: this setting only exists in Omaha's engine
-    ServerListUseScheduler(serverlist);
-
-    available = (int)ServerListGetNumMasters();
-    if (available < 1) {
-        return GE_NODNS;
-    }
-
-    if (maxmasters < 1) {
-        maxmasters = 1;
-    } else if (maxmasters > available) {
-        maxmasters = available;
-    }
-
-    if (maxmasters == serverlist->numslsockets) {
-        return GE_NOERROR;
-    }
-
-    newsockets = (GServerListSocket)gsimalloc(
-        sizeof(struct GServerListSocketImplementation) * maxmasters
-    );
-    if (!newsockets) {
-        return GE_NOSOCKET;
-    }
-    memset(newsockets, 0, sizeof(struct GServerListSocketImplementation) * maxmasters);
-    for (i = 0; i < maxmasters; i++) {
-        newsockets[i].s = INVALID_SOCKET;
-    }
-
-    gsifree(serverlist->slsockets);
-    serverlist->slsockets = newsockets;
-    serverlist->numslsockets = maxmasters;
-    return GE_NOERROR;
-}
-
-GError ServerListSetQueryTimeout(GServerList serverlist, unsigned long timeout)
-{
-    if (serverlist->state != sl_idle) {
-        return GE_BUSY;
-    }
-
-    // Added in MoH Arena: this setting only exists in Omaha's engine
-    ServerListUseScheduler(serverlist);
-
-    serverlist->retryqueries = 0;
-    serverlist->firstquerytimeout = timeout;
-    serverlist->retryquerytimeout = timeout;
-    return GE_NOERROR;
-}
-
-GError ServerListSetRetryTimeouts(
-    GServerList serverlist, unsigned long firstTimeout, unsigned long retryTimeout
-)
-{
-    if (serverlist->state != sl_idle) {
-        return GE_BUSY;
-    }
-
-    // Added in MoH Arena: this setting only exists in Omaha's engine
-    ServerListUseScheduler(serverlist);
-
-    serverlist->retryqueries = 1;
-    serverlist->firstquerytimeout = firstTimeout;
-    serverlist->retryquerytimeout = retryTimeout;
-    return GE_NOERROR;
-}
-
-GError ServerListSetPipelining(GServerList serverlist, gbool enabled)
-{
-    if (serverlist->state != sl_idle) {
-        return GE_BUSY;
-    }
-
-    // Added in MoH Arena: this setting only exists in Omaha's engine
-    ServerListUseScheduler(serverlist);
-
-    serverlist->pipelinequeries = enabled;
-    return GE_NOERROR;
-}
-
-void ServerListGetQueryStats(
-    GServerList serverlist, int *discovered, int *completed, int *responsive, int *timedout, int *active
-)
-{
-    int i;
-    int activecount = 0;
-
-    if (discovered) {
-        *discovered = ArrayLength(serverlist->servers);
-    }
-    if (completed) {
-        *completed = serverlist->scheduler.completed;
-    }
-    if (responsive) {
-        *responsive = serverlist->scheduler.responsive;
-    }
-    if (timedout) {
-        *timedout = serverlist->scheduler.timedout;
-    }
-    if (active) {
-        if (serverlist->updateinitialized) {
-            for (i = 0; i < serverlist->maxupdates; i++) {
-                if (serverlist->updatelist[i].currentserver != NULL) {
-                    activecount++;
-                }
-            }
-        }
-        *active = activecount;
-    }
+    *responsive = serverlist->scheduler.responsive;
+    *timedout = serverlist->scheduler.timedout;
 }
 
 
@@ -605,6 +382,8 @@ static GError CreateServerListLANSocket(GServerList serverlist)
         return GE_NOSOCKET;
     if (setsockopt(slsocket->s, SOL_SOCKET, SO_BROADCAST, (char *)&optval, sizeof(optval)) != 0)
         return GE_NOSOCKET;
+    // ServerListCheckSocketError closes a list socket silent for INTERNET_SEARCH_TIME
+    slsocket->lastreplytime = current_time();
 
     //else we are ready to broadcast
     return 0;
@@ -733,11 +512,12 @@ GError ServerListUpdate(GServerList serverlist, gbool async)
     return ServerListUpdate2(serverlist, async, NULL, qt_status);
 }
 
-// Added in MoH Arena: Omaha's ServerListUpdate2, for a list that uses the scheduler
-static GError ServerListUpdate2Scheduled(GServerList serverlist, gbool async, char *filter, GQueryType querytype)
+/* ServerListUpdate2
+-------------------------
+Start updating a GServerList. */
+GError ServerListUpdate2(GServerList serverlist, gbool async, char *filter, GQueryType querytype)
 {
     GError error;
-    int i;
 
     if (serverlist->state != sl_idle)
         return GE_BUSY;
@@ -758,7 +538,6 @@ static GError ServerListUpdate2Scheduled(GServerList serverlist, gbool async, ch
     }
 
     serverlist->async = async;
-    serverlist->startslindex = 0;
 
     if (querytype != qt_grouprooms && querytype != qt_masterinfo) {
         error = InitUpdateList(serverlist);
@@ -767,65 +546,12 @@ static GError ServerListUpdate2Scheduled(GServerList serverlist, gbool async, ch
         }
     }
 
-    error = CreateServerListForAvailableSockets(serverlist, async);
-    //if (error) return error;
+    ServerListStartMasters(serverlist);
 
-    if (async) {
-        // As it's asynchronous, set the state to transfering
-        ServerListModeChange(serverlist, sl_listxfer);
-        return 0;
-    }
-
-    for(i = 0; i < serverlist->numslsockets; i++) {
-        ServerListStartQuery(serverlist, &serverlist->slsockets[i], async);
-    }
-
-    return 0;
-}
-
-/* ServerListUpdate2
--------------------------
-Start updating a GServerList. */
-GError ServerListUpdate2(GServerList serverlist, gbool async, char *filter, GQueryType querytype)
-{
-    GError error;
-    int i;
-
-    // Added in MoH Arena: a list that uses the scheduler takes Omaha's version
-    if (serverlist->usescheduler) {
-        return ServerListUpdate2Scheduled(serverlist, async, filter, querytype);
-    }
-
-    if (serverlist->state != sl_idle)
-        return GE_BUSY;
-
-    serverlist->querytype = querytype;
-    error = CreateServerListForAvailableSockets(serverlist, async);
-    //if (error) return error;
-
-    serverlist->nextupdate = 0;
-    serverlist->abortupdate = 0;
-    // Added in 2.0
-    serverlist->auxinsertcount = ServerListCount(serverlist);
-    // Added in 2.0
-    //serverlist->cryptkey.index = -1;
-    if (filter) {
-        strncpy(serverlist->filter, filter, sizeof(serverlist->filter));
-    } else {
-        serverlist->filter[0] = 0;
-    }
-
-    serverlist->async = async;
-
-    if (async) {
-        // As it's asynchronous, set the state to transfering
-        ServerListModeChange(serverlist, sl_listxfer);
-        return 0;
-    }
-
-    for(i = 0; i < serverlist->numslsockets; i++) {
-        ServerListStartQuery(serverlist, &serverlist->slsockets[i], async);
-    }
+    // ServerListThink reads the masters and queries the servers
+    ServerListModeChange(serverlist, sl_listxfer);
+    if (!async)
+        DoSyncLoop(serverlist);
 
     return 0;
 }
@@ -842,12 +568,8 @@ GError ServerListLANUpdate(GServerList serverlist, gbool async, int startsearchp
     if (serverlist->state != sl_idle)
         return GE_BUSY;
 
-    // Added in MoH Arena: a list that uses the scheduler starts every update with a clean
-    // scheduler (Omaha's code)
-    if (serverlist->usescheduler) {
-        GServerListSchedulerInit(&serverlist->scheduler);
-        ArrayClear(serverlist->retryservers);
-    }
+    GServerListSchedulerInit(&serverlist->scheduler);
+    ArrayClear(serverlist->retryservers);
 
     error = InitUpdateList(serverlist);
     if (error) return error;
@@ -855,7 +577,6 @@ GError ServerListLANUpdate(GServerList serverlist, gbool async, int startsearchp
     if (error) return error;
     error = SendBroadcastRequest(serverlist, startsearchport, endsearchport, searchdelta);
     if (error) return error;
-    serverlist->nextupdate = 0;
     serverlist->abortupdate = 0;
     if (!async)
         DoSyncLoop(serverlist);
@@ -935,28 +656,6 @@ static int ServerListFindServerInUpdateList(GServerList serverlist, GServer serv
     return -1;
 }
 
-// Added in MoH Arena: Omaha's ServerListRemoveServer, for a list that uses the scheduler
-static void ServerListRemoveServerScheduled(GServerList serverlist, char *ip, int port)
-{
-    int currentindex = ServerListFindServer(serverlist, inet_addr(ip), port);
-    int updateindex;
-
-    if (currentindex == -1)
-        return; //can't do anything, it doesn't exist
-
-    //check to see whether we need to change the updatelist or move the next claim
-    if (serverlist->state != sl_idle && serverlist->scheduler.next > currentindex) 
-    {
-        GServer holdserver = *(GServer *)ArrayNth(serverlist->servers,currentindex);
-        updateindex = ServerListFindServerInUpdateList(serverlist, holdserver);
-        if (updateindex != -1) //is currently being queried, stop it
-            serverlist->updatelist[updateindex].currentserver = NULL;
-        serverlist->scheduler.next--; //decrement the next update, since we are removing a server
-    }
-    ServerListRemoveRetry(serverlist, *(GServer *)ArrayNth(serverlist->servers, currentindex));
-    ArrayDeleteAt(serverlist->servers, currentindex); 
-}
-
 /* ServerListRemoveServer
 -------------------------
 Removes a single server from the list. Frees the memory associated with the GServer */
@@ -965,24 +664,21 @@ void ServerListRemoveServer(GServerList serverlist, char *ip, int port)
     int currentindex = ServerListFindServer(serverlist, inet_addr(ip), port);
     int updateindex;
 
-    // Added in MoH Arena: a list that uses the scheduler takes Omaha's version
-    if (serverlist->usescheduler) {
-        ServerListRemoveServerScheduled(serverlist, ip, port);
-        return;
-    }
-
     if (currentindex == -1)
         return; //can't do anything, it doesn't exist
 
-    //check to see whether we need to change the updatelist or move the nextupdate
-    if (serverlist->state != sl_idle && serverlist->nextupdate > currentindex) 
-    {
-        GServer holdserver = *(GServer *)ArrayNth(serverlist->servers,currentindex);
+    //check to see whether we need to change the updatelist or move the next claim
+    if (serverlist->state != sl_idle && serverlist->scheduler.next > currentindex) {
+        GServer holdserver = *(GServer *)ArrayNth(serverlist->servers, currentindex);
         updateindex = ServerListFindServerInUpdateList(serverlist, holdserver);
-        if (updateindex != -1) //is currently being queried, stop it
+        if (updateindex != -1) {
+            // Cancel in-flight query and account for it like a final timeout.
             serverlist->updatelist[updateindex].currentserver = NULL;
-        serverlist->nextupdate--; //decrement the next update, since we are removing a server
+            GServerListSchedulerComplete(&serverlist->scheduler, 0);
+        }
+        serverlist->scheduler.next--; //decrement the next update, since we are removing a server
     }
+    ServerListRemoveRetry(serverlist, *(GServer *)ArrayNth(serverlist->servers, currentindex));
     ArrayDeleteAt(serverlist->servers, currentindex); 
 }
 
@@ -1004,8 +700,11 @@ static void ServerListRemoveRetry(GServerList serverlist, GServer server)
     }
 }
 
-// Added in MoH Arena: Omaha's ServerListAuxUpdate, for a list that uses the scheduler
-static GError ServerListAuxUpdateScheduled(GServerList serverlist, const char *ip, int port, gbool async, GQueryType querytype)
+/* ServerListUpdate
+-------------------
+Adds an auxilliary (non-fetched) server to the update list.
+If the engine is idle, the server is added and the engine started. */
+GError ServerListAuxUpdate(GServerList serverlist, const char *ip, int port, gbool async, GQueryType querytype)
 {
     GError error;
     int currentindex;
@@ -1074,88 +773,6 @@ static GError ServerListAuxUpdateScheduled(GServerList serverlist, const char *i
             ArrayInsertAt(serverlist->servers,&holdserver, serverlist->scheduler.next); //insert at new place
             ArrayRemoveAt(serverlist->servers,currentindex); //remove the old one
             serverlist->scheduler.next--; //decrement the next update, since we are removing a server
-        }
-    }
-    return 0;
-}
-
-/* ServerListUpdate
--------------------
-Adds an auxilliary (non-fetched) server to the update list.
-If the engine is idle, the server is added and the engine started. */
-GError ServerListAuxUpdate(GServerList serverlist, const char *ip, int port, gbool async, GQueryType querytype)
-{
-    GError error;
-    int currentindex;
-    int updateindex;
-    unsigned int real_ip = inet_addr(ip);
-
-    // Added in MoH Arena: a list that uses the scheduler takes Omaha's version
-    if (serverlist->usescheduler) {
-        return ServerListAuxUpdateScheduled(serverlist, ip, port, async, querytype);
-    }
-
-    //first, see if the server already exists
-    currentindex = ServerListFindServer(serverlist,real_ip,port);
-
-
-    //if we're idle, start things up
-    if (serverlist->state == sl_idle)
-    {
-        //prepare as if we're going to do a normal list fetch,
-        //but skip the call to SendListRequest().
-
-        
-        error = InitUpdateList(serverlist);
-        if (error) return error;
-        if (currentindex != -1) //we need to "move" this server to the end of the list
-        { //move the server to the end of the array
-            GServer holdserver = *(GServer *)ArrayNth(serverlist->servers,currentindex);
-            holdserver->querytype = querytype;
-            holdserver->ping = 9999;//clear the ping so it gets recalculated
-            ArrayRemoveAt(serverlist->servers,currentindex);
-            ArrayAppend(serverlist->servers,&holdserver);
-        } else
-        {	//add the aux server
-            ServerListAddServer(serverlist, real_ip, (unsigned short)port, querytype);
-        }
-        
-        serverlist->nextupdate = ArrayLength(serverlist->servers) - 1;
-        serverlist->abortupdate = 0;
-
-        //chane the mode straight to querying
-        ServerListModeChange(serverlist, sl_querying);
-        //is it's a sync call, do it until done
-        if (!async)
-            DoSyncLoop(serverlist);
-
-    }
-    else
-    {
-        //if we're in the middle of an update, we should
-        //be able to just slip the aux server in for querying
-        //ServerListAddServer(serverlist, ip, port);
-        //crt -- make it the next server to be queried
-        //note: this should NEVER be called in a different thread from think!!
-        if (currentindex == -1) //it doesn't exist yet
-        {
-            ServerListInsertServer(serverlist, real_ip, (unsigned short)port, serverlist->nextupdate, querytype);
-            if (serverlist->state == sl_listxfer || serverlist->state == sl_lanlist) //list is still being xfer'd - make sure it won't add this again!
-                serverlist->auxinsertcount++;
-        }
-        else 
-        { //it exists, find out whats happening to it
-            GServer holdserver = *(GServer *)ArrayNth(serverlist->servers,currentindex);
-            if (currentindex >= serverlist->nextupdate) //hasn't been queried yet!
-                return 0; //it will be queried soon anyway
-            holdserver->querytype = querytype;
-            holdserver->ping = 9999;//clear the ping so it gets recalculated
-            updateindex = ServerListFindServerInUpdateList(serverlist, holdserver);
-            if (updateindex != -1) //is currently being queried, stop it
-                serverlist->updatelist[updateindex].currentserver = NULL;
-            ArrayInsertAt(serverlist->servers,&holdserver, serverlist->nextupdate); //insert at new place
-            ArrayRemoveAt(serverlist->servers,currentindex); //remove the old one
-            serverlist->nextupdate--; //decrement the next update, since we are removing a server
         }
     }
     return 0;
@@ -1320,7 +937,6 @@ static GError ServerListReadList(GServerList serverlist, GServerListSocket slsoc
     }
 
     slsocket->lastreplytime = current_time();
-    serverlist->lastsltime = slsocket->lastreplytime;
 
     if (serverlist->encryptdata && slsocket->cryptkey.index != -1)
     {
@@ -1392,27 +1008,13 @@ static GError ServerListReadList(GServerList serverlist, GServerListSocket slsoc
                 // Fixed in OPM
                 //  Use the entire array instead
                 currentindex = ServerListFindServer(serverlist,ip,ntohs(port));
-                // Added in MoH Arena: a list that uses the scheduler tells the caller about each
-                // new server and, with pipelining, starts querying while the master still sends
-                // (Omaha's code)
-                if (serverlist->usescheduler) {
-                    if (currentindex == -1)
-                    {
-                        GServer server = ServerListAddServer(serverlist,ip,  ntohs(port), serverlist->querytype );
-                        serverlist->CallBackFn(
-                            serverlist,
-                            LIST_SERVERADDED,
-                            serverlist->instance,
-                            server,
-                            NULL
-                        );
-                        if (serverlist->pipelinequeries && serverlist->state == sl_listxfer) {
-                            ServerListModeChange(serverlist, sl_querying);
-                        }
+                if (currentindex == -1)
+                {
+                    ServerListAddServer(serverlist,ip,  ntohs(port), serverlist->querytype );
+                    if (serverlist->state == sl_listxfer) {
+                        // query the servers while the masters still send
+                        ServerListModeChange(serverlist, sl_querying);
                     }
-                } else {
-                    if (currentindex == -1)
-                        ServerListAddServer(serverlist,ip,  ntohs(port), serverlist->querytype );	
                 }
             }
         }
@@ -1423,45 +1025,30 @@ static GError ServerListReadList(GServerList serverlist, GServerListSocket slsoc
 
 }
 
+//a query got no answer: the first one is sent again later, the second one is the end
 static void ServerListHandleQueryFailure(GServerList serverlist, int updateindex)
 {
     UpdateInfo *update = &serverlist->updatelist[updateindex];
     GServer server = update->currentserver;
 
-    if (serverlist->retryqueries && update->attempt == 0) {
+    if (update->attempt == 0) {
         ArrayAppend(serverlist->retryservers, &server);
         GServerListSchedulerQueueRetry(&serverlist->scheduler);
         server->ping = 9999;
-        serverlist->CallBackFn(
-            serverlist,
-            LIST_QUERYRETRY,
-            serverlist->instance,
-            server,
-            NULL
-        );
     } else {
         GServerListSchedulerComplete(&serverlist->scheduler, 0);
-        serverlist->CallBackFn(
-            serverlist,
-            LIST_QUERYTIMEOUT,
-            serverlist->instance,
-            server,
-            NULL
-        );
     }
 
     update->currentserver = NULL;
 }
 
-// Added in MoH Arena: Omaha's ServerListQueryLoop, for a list that uses the scheduler
-static GError ServerListQueryLoopScheduled(GServerList serverlist)
+static GError ServerListQueryLoop(GServerList serverlist)
 {
     int i, active = 0, error, final;
     int serverindex;
     int retryindex;
     int percent;
     int discovered;
-    int mastersFinished;
     fd_set set;
     struct timeval timeout = {0,0};
     char indata[1500];
@@ -1469,7 +1056,6 @@ static GError ServerListQueryLoopScheduled(GServerList serverlist)
     int saddrlen = sizeof(saddr);
     GServer server;
     UpdateInfo *update;
-    unsigned long querytimeout;
 
 //first, check for available data
     FD_ZERO(&set);
@@ -1530,10 +1116,7 @@ static GError ServerListQueryLoopScheduled(GServerList serverlist)
         if (update->currentserver == NULL) {
             continue;
         }
-        querytimeout = update->attempt
-            ? serverlist->retryquerytimeout
-            : serverlist->firstquerytimeout;
-        if (current_time() - update->starttime > querytimeout) {
+        if (current_time() - update->starttime > (update->attempt ? QUERY_RETRY_TIMEOUT : QUERY_TIMEOUT)) {
             ServerListHandleQueryFailure(serverlist, i);
         }
     }
@@ -1546,39 +1129,9 @@ static GError ServerListQueryLoopScheduled(GServerList serverlist)
         }
     }
 
-    if (serverlist->abortupdate)
+    if (ServerListHasFinishedFetchingList(serverlist)
+        && GServerListSchedulerDone(&serverlist->scheduler, ArrayLength(serverlist->servers), active))
     { //we are done!!
-        FreeUpdateList(serverlist);
-        ServerListModeChange(serverlist, sl_idle);
-        return 0;
-    }
-
-    // non-pipelined callers: pause querying while masters are still transferring
-    if (!serverlist->pipelinequeries) {
-        if (serverlist->scheduler.next >= ArrayLength(serverlist->servers) && active == 0
-            && (serverlist->startslindex < ServerListGetNumMasters()
-                || !ServerListHasFinishedFetchingList(serverlist))) {
-            ServerListModeChange(serverlist, sl_listxfer);
-            return 0;
-        }
-
-        if (!ServerListHasFinishedFetchingList(serverlist)
-            && current_time() < serverlist->lastsltime + SERVER_QUERY_MAX_PAUSE) {
-            // Make sure to not send out other queries if currently fetching from other lists
-            // to avoid overloading the network
-            return GE_BUSY;
-        }
-    }
-
-    mastersFinished = serverlist->startslindex >= ServerListGetNumMasters()
-        && ServerListHasFinishedFetchingList(serverlist);
-    if (GServerListSchedulerDone(
-            &serverlist->scheduler,
-            ArrayLength(serverlist->servers),
-            active,
-            mastersFinished
-        ))
-    {
         FreeUpdateList(serverlist);
         ServerListModeChange(serverlist, sl_idle);
         return 0;
@@ -1623,180 +1176,8 @@ static GError ServerListQueryLoopScheduled(GServerList serverlist)
             continue;
         }
         serverlist->updatelist[i].starttime = current_time();
-        serverlist->CallBackFn(
-            serverlist,
-            LIST_QUERYSTARTED,
-            serverlist->instance,
-            server,
-            NULL
-        );
     }
 
-
-    return 0;
-}
-
-//loop through pending queries and send out new ones
-static GError ServerListQueryLoop(GServerList serverlist)
-{
-    int i, scount = 0, error, final;
-    fd_set set;
-    struct timeval timeout = {0,0};
-    char indata[1500];
-    struct sockaddr_in saddr;
-    int saddrlen = sizeof(saddr);
-    GServer server;
-
-    // Added in MoH Arena: a list that uses the scheduler takes Omaha's version
-    if (serverlist->usescheduler) {
-        return ServerListQueryLoopScheduled(serverlist);
-    }
-
-//first, check for available data
-    FD_ZERO(&set);
-    for (i = 0 ; i < serverlist->maxupdates ; i++)
-        if (serverlist->updatelist[i].currentserver != NULL) //there is a server waiting
-        {
-            scount++;
-            FD_SET( serverlist->updatelist[i].s, &set);
-
-        }
-    if (scount > 0) //there are sockets to check for data
-    {
-        error = select(FD_SETSIZE, &set, NULL, NULL, &timeout);
-        if (!gsiSocketIsError(error) && 0 != error)
-            for (i = 0 ; i < serverlist->maxupdates ; i++)
-                if (serverlist->updatelist[i].currentserver != NULL && FD_ISSET(serverlist->updatelist[i].s, &set) ) //there is a server waiting
-                { //we can read data!!
-                    saddrlen = sizeof(saddr);
-                    error = recvfrom(serverlist->updatelist[i].s, indata, sizeof(indata) - 1, 0,(struct sockaddr *)&saddr, &saddrlen);
-
-                    if (saddr.sin_addr.s_addr != serverlist->updatelist[i].saddr.sin_addr.s_addr ||
-                            saddr.sin_port != serverlist->updatelist[i].saddr.sin_port)
-                        continue; //it wasn't from this server
-
-                    if (!gsiSocketIsError(error)) //we got data
-                    {
-                        indata[error] = 0; //truncate and parse it
-                        final = (strstr(indata,"\\final\\") != NULL);
-                        server = serverlist->updatelist[i].currentserver;
-                        if (server->ping == 9999) //set the ping
-                            server->ping = (short)(current_time() - serverlist->updatelist[i].starttime);
-                        ServerParseKeyVals(server, indata); 
-                        if (final) //it's all done
-                        {
-                            serverlist->CallBackFn(serverlist, 
-                                                    LIST_PROGRESS, 
-                                                    serverlist->instance,
-                                                    server,
-                                                    (void *)((serverlist->nextupdate * 100) / ArrayLength(serverlist->servers))); //percent done
-                            serverlist->updatelist[i].currentserver = NULL; //reuse the updatelist
-                        } 
-                    } else
-                        serverlist->updatelist[i].currentserver = NULL; //reuse the updatelist
-                    
-                }
-    }
-    //kill expired ones
-    for (i = 0 ; i < serverlist->maxupdates ; i++)
-        if (serverlist->updatelist[i].currentserver != NULL && current_time() - serverlist->updatelist[i].starttime > SERVER_TIMEOUT ) 
-        {
-            /* serverlist->CallBackFn(serverlist,  //do we want to notify of dead servers? if so, uncomment!
-                LIST_PROGRESS, 
-                serverlist->instance,
-                *(GServer *)serverlist->updatelist[i].currentserver,
-                (void *)((serverlist->nextupdate * 100) / ArrayLength(serverlist->servers))); //percent done
-                */
-            serverlist->updatelist[i].currentserver = NULL; //reuse the updatelist
-        }
-        
-    if (serverlist->abortupdate || (serverlist->nextupdate >= ArrayLength(serverlist->servers) && scount == 0)) 
-    { //we are done!!
-        FreeUpdateList(serverlist);
-        if (serverlist->abortupdate) {
-            ServerListModeChange(serverlist, sl_idle);
-            return 0;
-        }
-
-        if (serverlist->startslindex < ServerListGetNumMasters() || !ServerListHasFinishedFetchingList(serverlist)) {
-            ServerListModeChange(serverlist, sl_listxfer);
-        } else {
-            // No more masters
-            ServerListModeChange(serverlist, sl_idle);
-        }
-        return 0;
-    }
-
-    if (!ServerListHasFinishedFetchingList(serverlist) && current_time() < serverlist->lastsltime + SERVER_QUERY_MAX_PAUSE) {
-        // Make sure to not send out other queries if currently fetching from other lists
-        // to avoid overloading the network
-        return GE_BUSY;
-    }
-
-//now, send out queries on available sockets
-    for (i = 0 ; i < serverlist->maxupdates && serverlist->nextupdate < ArrayLength(serverlist->servers) ; i++)
-        if (serverlist->updatelist[i].currentserver == NULL) //it's availalbe
-        {
-            server = *(GServer *)ArrayNth(serverlist->servers,serverlist->nextupdate);
-            serverlist->nextupdate++;
-            serverlist->updatelist[i].currentserver = server;
-            serverlist->updatelist[i].saddr.sin_family = AF_INET;
-            serverlist->updatelist[i].saddr.sin_addr.s_addr = inet_addr(ServerGetAddress(server));
-            serverlist->updatelist[i].saddr.sin_port = htons((short)ServerGetQueryPort(server));
-            sendto(serverlist->updatelist[i].s,querystrings[server->querytype] ,querylengths[server->querytype],0,(struct sockaddr *)&serverlist->updatelist[i].saddr,sizeof(struct sockaddr_in));
-            serverlist->updatelist[i].starttime = current_time();
-        }
-
-
-    return 0;
-}
-
-// Added in MoH Arena: Omaha's ServerListThink, for a list that uses the scheduler
-static GError ServerListThinkScheduled(GServerList serverlist)
-{
-    int i;
-
-    for(i = 0; i < serverlist->numslsockets; i++) {
-        ServerListThinkSocket(serverlist, &serverlist->slsockets[i]);
-    }
-
-    if (serverlist->abortupdate) {
-        for (i = 0; i < serverlist->numslsockets; i++) {
-            if (serverlist->slsockets[i].s != INVALID_SOCKET) {
-                closesocket(serverlist->slsockets[i].s);
-                serverlist->slsockets[i].s = INVALID_SOCKET;
-            }
-            serverlist->slsockets[i].socketstate = ls_none;
-        }
-        FreeUpdateList(serverlist);
-        if (serverlist->state != sl_idle) {
-            ServerListModeChange(serverlist, sl_idle);
-        }
-        return GE_NOERROR;
-    }
-
-    if ((serverlist->state == sl_listxfer
-            || (serverlist->state == sl_querying && serverlist->pipelinequeries))
-        && serverlist->startslindex < ServerListGetNumMasters()) {
-        CreateServerListForAvailableSockets(serverlist, serverlist->async);
-    }
-
-    switch(serverlist->state)
-    {
-        case sl_idle:
-            break;
-        case sl_listxfer:
-            if (serverlist->startslindex >= ServerListGetNumMasters()
-                && ServerListHasFinishedFetchingList(serverlist)) {
-                ServerListModeChange(serverlist, sl_idle);
-            }
-            break;
-        case sl_querying: 
-            //do some queries
-            return ServerListQueryLoop(serverlist);
-        break;
-        default: break;
-    }
 
     return 0;
 }
@@ -1809,22 +1190,32 @@ GError ServerListThink(GServerList serverlist)
 {
     int i;
 
-    // Added in MoH Arena: a list that uses the scheduler takes Omaha's version
-    if (serverlist->usescheduler) {
-        return ServerListThinkScheduled(serverlist);
-    }
-
     for(i = 0; i < serverlist->numslsockets; i++) {
         ServerListThinkSocket(serverlist, &serverlist->slsockets[i]);
+    }
+
+    if (serverlist->abortupdate) {
+        for (i = 0; i < serverlist->numslsockets; i++) {
+            if (serverlist->slsockets[i].s != INVALID_SOCKET) {
+                closesocket(serverlist->slsockets[i].s);
+                serverlist->slsockets[i].s = INVALID_SOCKET;
+                serverlist->slsockets[i].socketstate = ls_none;
+            }
+        }
+        FreeUpdateList(serverlist);
+        // a name being resolved: the thread writes into its handle until it ends (never cancelled)
+        if (serverlist->state != sl_idle && ServerListHasFinishedFetchingList(serverlist)) {
+            ServerListModeChange(serverlist, sl_idle);
+        }
+        return GE_NOERROR;
     }
 
     switch(serverlist->state)
     {
         case sl_idle:
+            break;
         case sl_listxfer:
-            if (!serverlist->abortupdate && serverlist->startslindex < ServerListGetNumMasters()) {
-                CreateServerListForAvailableSockets(serverlist, serverlist->async);
-            } else if (serverlist->state == sl_listxfer && ServerListHasFinishedFetchingList(serverlist)) {
+            if (ServerListHasFinishedFetchingList(serverlist)) {
                 ServerListModeChange(serverlist, sl_idle);
             }
             break;
@@ -1859,17 +1250,13 @@ GError ServerListClear(GServerList serverlist)
     if (serverlist->state != sl_idle)
         return GE_BUSY;
     //fastest way to clear is kill and recreate
-    // Added in MoH Arena: a list that uses the scheduler also drops its retry list and its
-    // counters (Omaha's code)
-    if (serverlist->usescheduler) {
-        ArrayClear(serverlist->retryservers);
-        GServerListSchedulerInit(&serverlist->scheduler);
-    }
+    ArrayClear(serverlist->retryservers);
     ArrayFree(serverlist->servers);
     serverlist->servers = ArrayNew(sizeof(GServer), SERVER_GROWBY, ServerFree);
     TableFree(serverlist->keylist);
     serverlist->keylist = TableNew2(sizeof(char *),LIST_NUMKEYBUCKETS,LIST_NUMKEYCHAINS,GStringHash, GCaseInsensitiveCompare, GStringFree);
     serverlist->auxinsertcount = 0;
+    GServerListSchedulerInit(&serverlist->scheduler);
     return 0;
 }
 
@@ -2005,12 +1392,13 @@ void ServerListSort(GServerList serverlist, gbool ascending, char *sortkey, GCom
 Verify if the server list socket has an error or has timed out, and abort. */
 static GError ServerListCheckSocketError(GServerList serverlist, GServerListSocket slsocket)
 {
-    int so_error;
+    int so_error = 0;
     int len = sizeof(so_error);
+    gsi_time timeout = slsocket->socketstate == ls_connecting ? MASTER_CONNECT_TIME : INTERNET_SEARCH_TIME;
     getsockopt(slsocket->s, SOL_SOCKET, SO_ERROR, (void*)&so_error, &len);
 
     // Abort if the socket has an error or if it connect/recv has timed out
-    if (so_error || current_time() >= slsocket->lastreplytime + INTERNET_SEARCH_TIME) {
+    if (so_error || current_time() >= slsocket->lastreplytime + timeout) {
         closesocket(slsocket->s);
         slsocket->s = INVALID_SOCKET;
         slsocket->socketstate = ls_none;
@@ -2026,18 +1414,13 @@ Start querying a GServerList. */
 static GError ServerListStartQuery(GServerList serverlist, GServerListSocket slsocket, gbool async)
 {
     GError error;
-    int i;
 
     if (slsocket->socketstate != ls_connecting) {
         return GE_BUSY;
     }
 
     if (serverlist->abortupdate) {
-        for(i = 0; i < serverlist->numslsockets; i++) {
-            closesocket(serverlist->slsockets[i].s);
-            serverlist->slsockets[i].s = INVALID_SOCKET;
-        }
-        ServerListModeChange(serverlist, sl_idle);
+        // ServerListThink closes the sockets
         return GE_NOCONNECT;
     }
 
@@ -2053,14 +1436,6 @@ static GError ServerListStartQuery(GServerList serverlist, GServerListSocket sls
 
     error = SendListRequest(serverlist, slsocket, serverlist->filter);
     if (error) return error;
-    // Changed in MoH Arena: a list that uses the scheduler made its query sockets when the
-    // update began (Omaha's version)
-    if (!serverlist->usescheduler) {
-        if (serverlist->querytype != qt_grouprooms && serverlist->querytype != qt_masterinfo) {
-            error = InitUpdateList(serverlist);
-            if (error) return error;
-        }
-    }
 
     if (!async)
         DoSyncLoop(serverlist);
@@ -2076,7 +1451,7 @@ static gbool ServerListHasFinishedFetchingList(GServerList serverlist)
     int i;
 
     for(i = 0; i < serverlist->numslsockets; i++) {
-        if (serverlist->slsockets[i].s != INVALID_SOCKET) {
+        if (serverlist->slsockets[i].s != INVALID_SOCKET || serverlist->slsockets[i].socketstate == ls_resolving) {
             return 0;
         }
     }
@@ -2091,6 +1466,21 @@ updating to occur during async server list updates */
 GError ServerListThinkSocket(GServerList serverlist, GServerListSocket slsocket)
 {
     GError socketerror;
+    unsigned int ip;
+
+    if (slsocket->socketstate == ls_resolving) {
+        ip = gsiGetResolvedIP(slsocket->resolve);
+        if (ip == GSI_STILL_RESOLVING_HOSTNAME) {
+            return 0;
+        }
+        // the handle is freed
+        slsocket->resolve = NULL;
+        slsocket->socketstate = ls_none;
+        if (ip == GSI_ERROR_RESOLVING_HOSTNAME || serverlist->abortupdate) {
+            return GE_NODNS;
+        }
+        return CreateServerListSocket(serverlist, slsocket, ip);
+    }
 
     if (slsocket->s == INVALID_SOCKET) {
         return GE_NOSOCKET;

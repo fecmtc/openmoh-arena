@@ -8,7 +8,7 @@ file(GLOB SRCS_common
     ${SOURCE_DIR}/gamespy/gserverlist.c
     ${SOURCE_DIR}/gamespy/gserverlist_scheduler.c
 	${SOURCE_DIR}/gamespy/hashtable.c
-	${SOURCE_DIR}/gamespy/md5c.c
+    ${SOURCE_DIR}/gamespy/md5c.c
 	${SOURCE_DIR}/gamespy/gutil.c
 )
 

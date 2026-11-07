@@ -28,14 +28,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_moharena.h" // Added in MoH Arena
 #include "cl_moharena_uipolicy.h" // Added in MoH Arena
 #include "cl_uirender.h"
-#include "cl_fpsbench.h"
 #include "../corepp/tiki.h"
 #include "../qcommon/cm_terrain.h"
 #include "../qcommon/localization.h"
 #include "../qcommon/bg_compat.h"
 #include "../sys/sys_local.h"
-#include "../sys/sys_update_checker.h"
-#include "../uilib/uimessage.h"
 
 extern "C" {
 	#include "../sys/sys_loadlib.h"
@@ -66,6 +63,7 @@ cvar_t	*cl_master;
 cvar_t	*cl_timeNudge;
 cvar_t	*cl_showTimeDelta;
 cvar_t	*cl_freezeDemo;
+cvar_t	*cl_csAppend;
 
 cvar_t	*cl_shownet;
 cvar_t	*cl_netprofile;
@@ -84,8 +82,6 @@ cvar_t	*cl_sensitivity;
 cvar_t	*cl_mouseAccel;
 cvar_t	*cl_mouseAccelOffset;
 cvar_t	*cl_mouseAccelStyle;
-cvar_t	*cl_mouseAccelPower; // Added in Omaha
-cvar_t	*cl_mouseSensCap; // Added in Omaha
 cvar_t	*cl_showMouseRate;
 
 cvar_t	*cl_altbindings;
@@ -95,7 +91,6 @@ cvar_t	*m_pitch;
 cvar_t	*m_yaw;
 cvar_t	*m_forward;
 cvar_t	*m_side;
-cvar_t	*m_filter;
 
 cvar_t	*j_pitch;
 cvar_t	*j_yaw;
@@ -182,7 +177,6 @@ void CL_ServerStatus_f(void);
 void CL_ServerStatusResponse( netadr_t from, msg_t *msg );
 
 static qboolean cl_bCLSystemStarted = qfalse;
-static qboolean cl_updateNotified = qfalse;
 
 /*
 ===============
@@ -594,12 +588,7 @@ void CL_DemoCompleted( void )
 		}
 	}
 
-	// Added in Omaha: end the fps bench before disconnect so Abort is a no-op,
-	// then print after disconnect noise (and before nextdemo) so the stats are
-	// the last thing the player sees from the bench.
-	CL_FpsBench_DemoCompleted();
 	CL_Disconnect();
-	CL_FpsBench_PrintResults();
 	CL_NextDemo();
 }
 
@@ -620,7 +609,7 @@ void CL_ReadDemoMessage( void ) {
 	}
 
 	// get the sequence number
-	r = FS_Read( &s, 4, clc.demofile );
+	r = FS_Read( &s, 4, clc.demofile);
 	if ( r != 4 ) {
 		CL_DemoCompleted ();
 		return;
@@ -631,7 +620,7 @@ void CL_ReadDemoMessage( void ) {
 	MSG_Init( &buf, bufData, sizeof( bufData ) );
 
 	// get the length
-	r = FS_Read( &buf.cursize, 4, clc.demofile );
+	r = FS_Read (&buf.cursize, 4, clc.demofile);
 	if ( r != 4 ) {
 		CL_DemoCompleted ();
 		return;
@@ -738,25 +727,13 @@ void CL_PlayDemo_f( void ) {
 		Com_Error( ERR_DROP, "couldn't open %s", name);
 		return;
 	}
-	CL_BeginDemoPlayback( name, Cmd_Argv(1) );
-}
-
-/*
-====================
-CL_BeginDemoPlayback
-
-Added in Omaha: shared by CL_PlayDemo_f and fpsbench once the demo file
-is open; path is the opened file, arg the display name
-====================
-*/
-void CL_BeginDemoPlayback( const char *path, const char *arg ) {
-	Q_strncpyz( clc.demoName, arg, sizeof( clc.demoName ) );
+	Q_strncpyz( clc.demoName, Cmd_Argv(1), sizeof( clc.demoName ) );
 
     UI_CloseConsole();
 
 	clc.state = CA_CONNECTED;
 	clc.demoplaying = qtrue;
-	Q_strncpyz( clc.servername, arg, sizeof( clc.servername ) );
+	Q_strncpyz( clc.servername, Cmd_Argv(1), sizeof( clc.servername ) );
 
 	// read demo messages until connected
 	while ( clc.state >= CA_CONNECTED && clc.state < CA_PRIMED ) {
@@ -815,9 +792,6 @@ CL_ShutdownAll
 */
 void CL_ShutdownAll(qboolean shutdownRef) {
 
-#ifdef USE_CURL
-	CL_cURL_Shutdown();
-#endif
 	// clear sounds
 #if defined(NO_MODERN_DMA) && NO_MODERN_DMA
 	S_DisableSounds();
@@ -1019,8 +993,6 @@ void CL_Disconnect() {
 		FS_FCloseFile( clc.demofile );
 		clc.demofile = 0;
 	}
-	// Added in Omaha: leaving an unfinished fps bench restores its cvars
-	CL_FpsBench_Abort();
 
 	SCR_StopCinematic ();
 	S_ClearSoundBuffer();
@@ -1865,23 +1837,6 @@ Called when all downloading has been completed
 */
 void CL_DownloadsComplete( void ) {
 
-#ifdef USE_CURL
-	// if we downloaded with cURL
-	if(clc.cURLUsed) {
-		clc.cURLUsed = qfalse;
-		CL_cURL_Shutdown();
-		if( clc.cURLDisconnected ) {
-			if(clc.downloadRestart) {
-				FS_Restart(clc.checksumFeed);
-				clc.downloadRestart = qfalse;
-			}
-			clc.cURLDisconnected = qfalse;
-			CL_Reconnect_f();
-			return;
-		}
-	}
-#endif
-
 	// if we downloaded files we need to restart the file system
 	if (clc.downloadRestart) {
 		clc.downloadRestart = qfalse;
@@ -1953,7 +1908,6 @@ A download completed or failed
 void CL_NextDownload(void) {
 	char *s;
 	char *remoteName, *localName;
-	qboolean useCURL = qfalse;
 
 	// We are looking to start a download here
 	if (*clc.downloadList) {
@@ -1977,47 +1931,15 @@ void CL_NextDownload(void) {
 			*s++ = 0;
 		else
 			s = localName + strlen(localName); // point at the nul byte
-#ifdef USE_CURL
-		if(!(cl_allowDownload->integer & DLF_NO_REDIRECT)) {
-			if(clc.sv_allowDownload & DLF_NO_REDIRECT) {
-				Com_Printf("WARNING: server does not "
-					"allow download redirection "
-					"(sv_allowDownload is %d)\n",
-					clc.sv_allowDownload);
-			}
-			else if(!*clc.sv_dlURL) {
-				Com_Printf("WARNING: server allows "
-					"download redirection, but does not "
-					"have sv_dlURL set\n");
-			}
-			else if(!CL_cURL_Init()) {
-				Com_Printf("WARNING: could not load "
-					"cURL library\n");
-			}
-			else {
-				CL_cURL_BeginDownload(localName, va("%s/%s",
-					clc.sv_dlURL, remoteName));
-				useCURL = qtrue;
-			}
-		}
-		else if(!(clc.sv_allowDownload & DLF_NO_REDIRECT)) {
-			Com_Printf("WARNING: server allows download "
-				"redirection, but it disabled by client "
-				"configuration (cl_allowDownload is %d)\n",
+		if((cl_allowDownload->integer & DLF_NO_UDP)) {
+			Com_Error(ERR_DROP, "UDP Downloads are "
+				"disabled on your client. "
+				"(cl_allowDownload is %d)",
 				cl_allowDownload->integer);
+			return;
 		}
-#endif /* USE_CURL */
-		if(!useCURL) {
-			if((cl_allowDownload->integer & DLF_NO_UDP)) {
-				Com_Error(ERR_DROP, "UDP Downloads are "
-					"disabled on your client. "
-					"(cl_allowDownload is %d)",
-					cl_allowDownload->integer);
-				return;
-			}
-			else {
-				CL_BeginDownload( localName, remoteName );
-			}
+		else {
+			CL_BeginDownload( localName, remoteName );
 		}
 		clc.downloadRestart = qtrue;
 
@@ -2701,84 +2623,15 @@ void CL_SetFrameNumber(int frameNumber) {
 
 /*
 ==================
-CL_VerifyUpdate
-
-Check for a new version and display a message box
-when a new version is available
-==================
-*/
-void CL_VerifyUpdate() {
-    if (cl_updateNotified) {
-        return;
-    }
-
-    int lastMajor, lastMinor, lastPatch;
-    if (updateChecker.CheckNewVersion(lastMajor, lastMinor, lastPatch)) {
-        cl_updateNotified = true;
-
-        const char *updateText =
-            va("A new update is available!\n"
-               "The latest version is v%d.%d.%d (you are running v%s).\n"
-               "Check https://github.com/openmoh/openmohaa for more.",
-               lastMajor,
-               lastMinor,
-               lastPatch,
-               PRODUCT_VERSION_NUMBER_STRING);
-
-        UIMessageDialog::ShowMessageBox("Update available", updateText);
-    }
-}
-
-/*
-==================
 CL_Frame
 
 ==================
 */
-/*
-==================
-CL_RememberMouseAccel
-
-Added in Omaha: keep the last nonzero cl_mouseAccel so the settings switch can restore it.
-==================
-*/
-static void CL_RememberMouseAccel( void ) {
-	static int lastModificationCount = -1;
-
-	if ( cl_mouseAccel->modificationCount == lastModificationCount ) {
-		return;
-	}
-	lastModificationCount = cl_mouseAccel->modificationCount;
-	if ( cl_mouseAccel->value != 0.0f ) {
-		Cvar_Set( "ui_om_mouseaccel_last", cl_mouseAccel->string );
-	}
-}
-
 void CL_Frame ( int msec ) {
 
 	if ( !com_cl_running->integer ) {
 		return;
 	}
-
-	CL_RememberMouseAccel(); // Added in Omaha
-
-#ifdef USE_CURL
-	if(clc.downloadCURLM) {
-		CL_cURL_PerformDownload();
-		// we can't process frames normally when in disconnected
-		// download mode since the ui vm expects clc.state to be
-		// CA_CONNECTED
-		if(clc.cURLDisconnected) {
-			cls.realFrametime = msec;
-			cls.frametime = msec;
-			cls.realtime += cls.frametime;
-			SCR_UpdateScreen();
-			S_Update();
-			cls.framecount++;
-			return;
-		}
-	}
-#endif
 
 	if (CL_FinishedIntro()) {
 		if (clc.state == CA_DISCONNECTED) {
@@ -2815,8 +2668,6 @@ void CL_Frame ( int msec ) {
 				S_TriggeredMusic_PlayIntroMusic();
 				UI_MenuEscape("main");
 			}
-
-            CL_VerifyUpdate();
 		} else if (clc.state == CA_CINEMATIC) {
 			// Changed in MoH Arena: only with the modern UI
 			if (MoHArena_ModernUI()) {
@@ -2933,9 +2784,6 @@ void CL_Frame ( int msec ) {
 	// decide on the serverTime to render
 	CL_SetCGameTime();
 
-	// Added in Omaha: fps bench frame timing
-	CL_FpsBench_Frame();
-
 	// set the time if we loaded a save
 	if( SV_DoSaveGame() )
 	{
@@ -2965,6 +2813,10 @@ void CL_Frame ( int msec ) {
 
 	// advance local effects for next frame
 	SCR_RunCinematic();
+
+#ifdef USE_DISCORD
+	CL_Discord_Frame();
+#endif
 
 	cls.framecount++;
 }
@@ -3338,7 +3190,15 @@ void CL_InitRef( void ) {
 #define RENDERER_ARCH_DLL_EXT DLL_SUFFIX DLL_EXT
 
 #ifdef USE_RENDERER_DLOPEN
-	cl_renderer = Cvar_Get("cl_renderer", "opengl1", CVAR_ARCHIVE | CVAR_LATCH);
+	// renderer_vulkan, the only renderer; another name loads renderer_<name>
+	// (a test copy), and a name without a library falls back to vulkan.
+	// Upstream's OpenGL renderers are gone: an old config's opengl1 is reset,
+	// also where an earlier install left its library in the game folder
+	cl_renderer = Cvar_Get("cl_renderer", "vulkan", CVAR_ARCHIVE | CVAR_LATCH);
+	if (!Q_stricmpn(cl_renderer->string, "opengl", 6)) {
+		Com_Printf("cl_renderer %s: no OpenGL renderer any more, using vulkan\n", cl_renderer->string);
+		Cvar_ForceReset("cl_renderer");
+	}
 
 	Com_sprintf(dllName, sizeof(dllName), "renderer_%s" RENDERER_ARCH_DLL_EXT, cl_renderer->string);
 
@@ -3372,6 +3232,9 @@ void CL_InitRef( void ) {
 	ri.Printf = CL_RefPrintf;
 	ri.Error = Com_Error;
 	ri.Milliseconds = CL_ScaledMilliseconds;
+	ri.FrameToken = Com_FrameToken;
+	ri.PresentGate = Com_PresentGate;
+	ri.PresentMark = Com_PresentMark;
 	ri.LV_ConvertString = Sys_LV_CL_ConvertString;
 	ri.Malloc = CL_RefMalloc;
 	ri.Free = CL_RefFree;
@@ -3474,7 +3337,6 @@ void CL_InitRef( void ) {
 
 	ri.SKEL_GetBoneParent = CL_RefSKEL_GetBoneParent;
 	ri.SKEL_GetMorphWeightFrame = CL_RefSKEL_GetMorphWeightFrame;
-	ri.PresentGuard = Com_PresentGuard; // Added in Omaha
 
 	ret = GetRefAPI( REF_API_VERSION, &ri );
 
@@ -3730,6 +3592,8 @@ void CL_Init( void ) {
 	cl_showSend = Cvar_Get ("cl_showSend", "0", CVAR_TEMP );
 	cl_showTimeDelta = Cvar_Get ("cl_showTimeDelta", "0", CVAR_TEMP );
 	cl_freezeDemo = Cvar_Get ("cl_freezeDemo", "0", CVAR_TEMP );
+	// changed configstrings appended to the gamestate (CL_ConfigstringModified)
+	cl_csAppend = Cvar_Get ("cl_csAppend", "1", 0 );
 	rcon_client_password = Cvar_Get ("rconPassword", "", CVAR_TEMP );
 	cl_activeAction = Cvar_Get( "activeAction", "", CVAR_TEMP );
 
@@ -3746,35 +3610,25 @@ void CL_Init( void ) {
 	cl_pitchspeed = Cvar_Get ("cl_pitchspeed", "140", CVAR_ARCHIVE);
 	cl_anglespeedkey = Cvar_Get ("cl_anglespeedkey", "1.5", 0);
 
-	cl_maxpackets = Cvar_Get ("cl_maxpackets", "30", CVAR_ARCHIVE );
+	// every command of cl_movefps 100 in its own packet (MoHAA Reloaded's default, upstream's is 30)
+	cl_maxpackets = Cvar_Get ("cl_maxpackets", "125", CVAR_ARCHIVE );
 	cl_packetdup = Cvar_Get ("cl_packetdup", "1", CVAR_ARCHIVE );
 
 	cl_run = Cvar_Get( "cl_run", "1", CVAR_ARCHIVE );
 	cl_sensitivity = Cvar_Get( "sensitivity", "5", CVAR_ARCHIVE );
     cl_mouseAccel = Cvar_Get("cl_mouseAccel", "0", CVAR_ARCHIVE);
     cl_freelook = Cvar_Get("cl_freelook", "1", CVAR_ARCHIVE);
-	// Changed in Omaha: 0 legacy, 1 power, 2 curve
-	// Changed in MoH Arena: legacy stays the default, as in the original game
+	// 0: legacy mouse acceleration
+	// 1: new implementation
 	cl_mouseAccelStyle = Cvar_Get( "cl_mouseAccelStyle", "0", CVAR_ARCHIVE );
-	Cvar_CheckRange(cl_mouseAccelStyle, 0, 2, qtrue);
-	// style 1: the rate at which the acceleration doubles the gain (0 turns it off)
-	// style 2: rate in counts/ms below which the curve stays linear
-	// Changed in MoH Arena: the default stays 5, the original value
+	// offset for the power function (for style 1, ignored otherwise)
+	// this should be set to the max rate value
 	cl_mouseAccelOffset = Cvar_Get( "cl_mouseAccelOffset", "5", CVAR_ARCHIVE );
-	Cvar_CheckRange(cl_mouseAccelOffset, 0.0f, 50000.0f, qfalse);
-	// below 1 the exponent turns negative and the curve blows up
-	cl_mouseAccelPower = Cvar_Get( "cl_mouseAccelPower", "2", CVAR_ARCHIVE );
-	Cvar_CheckRange(cl_mouseAccelPower, 1.0f, 10.0f, qfalse);
-	// 0: no cap
-	cl_mouseSensCap = Cvar_Get( "cl_mouseSensCap", "0", CVAR_ARCHIVE );
-	Cvar_CheckRange(cl_mouseSensCap, 0.0f, 100.0f, qfalse);
+	Cvar_CheckRange(cl_mouseAccelOffset, 0.001f, 50000.0f, qfalse);
 
 	cl_showMouseRate = Cvar_Get ("cl_showmouserate", "0", 0);
 
 	cl_allowDownload = Cvar_Get ("cl_allowDownload", "0", CVAR_ARCHIVE);
-#ifdef USE_CURL
-	cl_cURLLib = Cvar_Get("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE);
-#endif
 
 	cl_altbindings = Cvar_Get( "cl_altbindings", "0", CVAR_ARCHIVE );
 	cl_ctrlbindings = Cvar_Get( "cl_altbindings", "0", CVAR_ARCHIVE );
@@ -3795,12 +3649,8 @@ void CL_Init( void ) {
 	m_yaw = Cvar_Get ("m_yaw", "0.022", CVAR_ARCHIVE);
 	m_forward = Cvar_Get ("m_forward", "0.25", CVAR_ARCHIVE);
 	m_side = Cvar_Get ("m_side", "0.25", CVAR_ARCHIVE);
-#ifdef MACOS_X
-        // Input is jittery on OS X w/o this
-	m_filter = Cvar_Get ("m_filter", "1", CVAR_ARCHIVE);
-#else
-	m_filter = Cvar_Get ("m_filter", "0", CVAR_ARCHIVE);
-#endif
+	// no m_filter: upstream's averaged each frame's mouse movement with the
+	// frame before's (half of every movement a frame later)
 
 	j_pitch =        Cvar_Get ("j_pitch",        "0.022", CVAR_ARCHIVE);
 	j_yaw =          Cvar_Get ("j_yaw",          "-0.022", CVAR_ARCHIVE);
@@ -3869,8 +3719,6 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("demo", CL_PlayDemo_f);
 	Cmd_AddCommand ("cinematic", CL_PlayCinematic_f);
 	Cmd_AddCommand ("stoprecord", CL_StopRecord_f);
-	// Added in Omaha: embedded demo fps bench
-	CL_FpsBench_Init();
 	Cmd_AddCommand ("connect", CL_Connect_f);
 	Cmd_AddCommand ("menuconnect", CL_MenuConnect_f);
 	Cmd_AddCommand ("reconnect", CL_Reconnect_f);
@@ -3913,6 +3761,10 @@ void CL_Init( void ) {
 	CL_GenerateQKey();
 	Cvar_Get( "cl_guid", "", CVAR_USERINFO | CVAR_ROM );
 	CL_UpdateGUID( NULL, 0 );
+
+#ifdef USE_DISCORD
+	CL_Discord_Init();
+#endif
 
 	CL_StartHunkUsers(qfalse);
 
@@ -3980,7 +3832,6 @@ void CL_Shutdown(const char* finalmsg, qboolean disconnect, qboolean quit) {
 	Cmd_RemoveCommand ("demo");
 	Cmd_RemoveCommand ("cinematic");
 	Cmd_RemoveCommand ("stoprecord");
-	CL_FpsBench_Shutdown();
 	Cmd_RemoveCommand ("connect");
 	Cmd_RemoveCommand ("localservers");
 	Cmd_RemoveCommand ("globalservers");
@@ -3995,6 +3846,10 @@ void CL_Shutdown(const char* finalmsg, qboolean disconnect, qboolean quit) {
 	Cmd_RemoveCommand ("stopvideo");
 
 	CL_ShutdownInput();
+
+#ifdef USE_DISCORD
+	CL_Discord_Shutdown();
+#endif
 
 	Cvar_Set( "cl_running", "0" );
 

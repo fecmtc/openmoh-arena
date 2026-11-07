@@ -29,38 +29,23 @@ source tree, or write to the Free Software Foundation, Inc.,
 #include "snd_local.h"
 #include "client.h"
 
-// Never NULL: stock entry points tolerate an uninitialized OpenAL host.
+// Never NULL: the stock entry points tolerate an uninitialized OpenAL host.
 const sndHost_t *s_sndHost = &s_sndHostOpenAL;
 
-#ifdef USE_OMAHA_SOUND
 static cvar_t *s_backend;
-#endif
 
 qboolean S_Host_Init(void)
 {
-#ifdef USE_OMAHA_SOUND
-    // Changed in MoH Arena: OpenAL is the default; the omaha host runs only
-    // when the player picks it.
+    // Changed in MoH Arena: OpenAL is the default; the Omaha mixer runs only
+    // when the player picks it (s_backend omaha).
     s_backend = Cvar_Get("s_backend", "openal", CVAR_ARCHIVE | CVAR_SOUND_LATCH);
     if (!Q_stricmp(s_backend->string, "omaha")) {
-        /*
-         * Added in Omaha: surround/quad need Soft; clamp to headphones HRTF so a
-         * leftover s_speaker_type 2/3 does not force a silent fall back to OpenAL
-         * while the UI still says Omaha.
-         */
-        if (Cvar_VariableIntegerValue("s_speaker_type") >= 2) {
-            Com_Printf("Sound: speaker_type %i (surround) is not supported by omaha.\n",
-                       Cvar_VariableIntegerValue("s_speaker_type"));
-            Cvar_Set("s_speaker_type", "1");
-            Com_Printf("Sound: omaha does not support surround; using Headphones (HRTF).\n");
-        }
         s_sndHost = &s_sndHostOmaha;
         if (s_sndHost->Init()) {
             return qtrue;
         }
         Com_Printf("Sound: omaha host unavailable, falling back to OpenAL.\n");
     }
-#endif
 
     s_sndHost = &s_sndHostOpenAL;
     return s_sndHost->Init();
@@ -154,29 +139,4 @@ void S_PrintInfo()
 void S_DumpInfo()
 {
     s_sndHost->DumpInfo();
-}
-
-qboolean S_Capture_Begin(void)
-{
-    return s_sndHost->CaptureBegin();
-}
-
-void S_Capture_End(void)
-{
-    s_sndHost->CaptureEnd();
-}
-
-void S_Capture_Frame(int aviFps)
-{
-    s_sndHost->CaptureFrame(aviFps);
-}
-
-qboolean S_Capture_Active(void)
-{
-    return s_sndHost->CaptureActive();
-}
-
-int S_Capture_SampleRate(void)
-{
-    return s_sndHost->CaptureSampleRate();
 }

@@ -99,13 +99,6 @@
 			<item value="1.5" label="High Detail"/>
 		</source>
 
-		<!-- Added in Omaha: 0 legacy, 1 power, 2 curve. -->
-		<source id="mouse-accel-style" default="0">
-			<item value="0" label="Legacy"/>
-			<item value="1" label="Power"/>
-			<item value="2" label="Curve"/>
-		</source>
-
 		<!-- Added in Omaha: zoom mouse scale mode (modern UI). -->
 		<source id="zoom-sensitivity-mode" default="legacy">
 			<item value="off" label="Off"/>

@@ -28,7 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 extern "C" {
 #endif
 
-#define	REF_API_VERSION		18
+#define	REF_API_VERSION		19	// 18: MoH Arena's main; 19: and MoHAA-Reloaded's FrameToken, PresentGate
 
 typedef struct dtiki_s dtiki_t;
 typedef struct skelAnimFrame_s skelAnimFrame_t;
@@ -181,6 +181,9 @@ typedef struct {
 
     void (*Set2DInitialShaderTime)(float startTime);
 
+    // DrawBox for count boxes (x, y, width, height) in one draw, in the color given (the crosshair)
+    void (*DrawBoxes)(const float (*boxes)[4], int count, const float *color);
+
 	/* Modern UI: dynamic RGBA atlas materials (clamp, no mips, no picmip, linear). */
 	qhandle_t (*CreateUIAtlas)(const char *name, const byte *rgba, int width, int height);
 	qboolean (*UpdateUIAtlas)(qhandle_t hShader, const byte *rgba, int width, int height);
@@ -318,6 +321,7 @@ typedef struct {
 
 	// system stuff
 	void	(*Sys_SetEnv)( const char *name, const char *value );
+	// no-ops that nothing calls any more, kept for the layout of refimport_t
 	void	(*Sys_GLimpSafeInit)( void );
 	void	(*Sys_GLimpInit)( void );
 	qboolean (*Sys_LowPhysicalMemory)( void );
@@ -392,9 +396,15 @@ typedef struct {
     int (*SKEL_GetMorphWeightFrame)(void *skeletor, int index, float time, int *data);
     int (*SKEL_GetBoneParent)(void *skeletor, int boneIndex);
 
-    // Added in Omaha: called right before the buffer swap; holds presents at least one
-    // com_maxfps period apart
-    void (*PresentGuard)(void);
+    // the frame limiter's present gate (Com_PresentGate): the renderer names
+    // each frame by the token it takes at the frame's end (FrameToken, its
+    // number) and gives it back before presenting the frame, on whichever
+    // thread presents: PresentGate waits until one period of the cap after
+    // the previous present (outside any lock the present needs), PresentMark
+    // right before the present call says this is it
+    uint64_t    (*FrameToken)(void);
+    void        (*PresentGate)(uint64_t token);
+    void        (*PresentMark)(uint64_t token);
 } refimport_t;
 
 

@@ -32,10 +32,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../cgame/cg_public.h"
 #include "../fgame/bg_public.h"
 
-#ifdef USE_CURL
-#include "cl_curl.h"
-#endif /* USE_CURL */
-
 #ifdef USE_VOIP
 #include <opus.h>
 #endif
@@ -122,12 +118,12 @@ typedef struct {
 
 	int			parseEntitiesNum;	// index (not anded off) into cl_parse_entities[]
 
-	int			mouseDx[2], mouseDy[2];	// added to by mouse events
-	int			mouseIndex;
-	// Added in Omaha: render-frame look output for cl_cmdfps-paced usercmds
-	usercmd_t	mouseCmd;			// BUTTON_ANY until the next usercmd
-	float		mouseStrafe[2];		// side, forward until the next usercmd
-	usercmd_t	predictCmd;			// newest usercmd with keys resampled this frame
+	int			mouseDx, mouseDy;	// added to by mouse events, taken by the next look (CL_MouseLook)
+
+	// what the mouse look of each frame leaves for the next usercmd
+	// (commands come at cl_movefps, see CL_ApplyLook)
+	int			lookButtons;		// BUTTON_ANY
+	float		lookMove[2];		// mouse strafe: rightmove, forwardmove
 
 	int				mousex, mousey;
 	unsigned int	mouseButtons;
@@ -214,14 +210,6 @@ typedef struct {
 	fileHandle_t download;
 	char		downloadTempName[MAX_OSPATH];
 	char		downloadName[MAX_OSPATH];
-#ifdef USE_CURL
-	qboolean	cURLEnabled;
-	qboolean	cURLUsed;
-	qboolean	cURLDisconnected;
-	char		downloadURL[MAX_OSPATH];
-	CURL		*downloadCURL;
-	CURLM		*downloadCURLM;
-#endif /* USE_CURL */
 	int		sv_allowDownload;
 	char		sv_dlURL[MAX_CVAR_VALUE_STRING];
 	int			downloadNumber;
@@ -424,7 +412,6 @@ extern qboolean	scr_initialized;
 //
 extern	cvar_t	*cl_nodelta;
 extern	cvar_t	*cl_debugMove;
-extern	cvar_t	*cl_cmdfps; // Added in Omaha
 extern	cvar_t	*cl_noprint;
 extern	cvar_t	*cl_timegraph;
 extern	cvar_t	*cl_debuggraph;
@@ -439,6 +426,7 @@ extern	cvar_t	*cl_showSend;
 extern	cvar_t	*cl_timeNudge;
 extern	cvar_t	*cl_showTimeDelta;
 extern	cvar_t	*cl_freezeDemo;
+extern	cvar_t	*cl_csAppend;
 
 extern	cvar_t	*cl_yawspeed;
 extern	cvar_t	*cl_pitchspeed;
@@ -451,8 +439,6 @@ extern	cvar_t	*cl_freelook;
 extern	cvar_t	*cl_mouseAccel;
 extern	cvar_t	*cl_mouseAccelOffset;
 extern	cvar_t	*cl_mouseAccelStyle;
-extern	cvar_t	*cl_mouseAccelPower; // Added in Omaha
-extern	cvar_t	*cl_mouseSensCap; // Added in Omaha
 extern	cvar_t	*cl_showMouseRate;
 
 extern	cvar_t	*cl_altbindings;
@@ -462,7 +448,6 @@ extern	cvar_t	*m_pitch;
 extern	cvar_t	*m_yaw;
 extern	cvar_t	*m_forward;
 extern	cvar_t	*m_side;
-extern	cvar_t	*m_filter;
 
 extern	cvar_t	*j_pitch;
 extern	cvar_t	*j_yaw;
@@ -482,7 +467,6 @@ extern	cvar_t	*cl_aviMotionJpeg;
 extern	cvar_t	*cl_activeAction;
 
 extern	cvar_t	*cl_allowDownload;
-extern  cvar_t  *cl_downloadMethod;
 extern	cvar_t	*cl_conXOffset;
 extern	cvar_t	*cl_inGameVideo;
 
@@ -558,7 +542,6 @@ const char *CL_ConfigString( int index );
 void CL_StartDemoLoop( void );
 void CL_NextDemo( void );
 void CL_ReadDemoMessage( void );
-void CL_BeginDemoPlayback( const char *path, const char *arg );
 void CL_StopRecord_f(void);
 
 void CL_InitDownloads(void);
@@ -609,9 +592,9 @@ void CL_UpdateMouse();
 
 void CL_InitInput (void);
 void CL_ShutdownInput(void);
-void CL_ApplyLateMouse( void ); // Added in Omaha: late look before cgame view
-float CL_MouseAccelSensitivity( float rate ); // Added in Omaha: rate in counts/ms
 void CL_SendCmd (void);
+void CL_GetViewUserCmd( usercmd_t *ucmd );
+void CL_GetLiveUserCmd( usercmd_t *ucmd );
 void CL_ClearState (void);
 void CL_ReadPackets (void);
 
@@ -778,17 +761,19 @@ void CL_WriteAVIAudioFrame( const byte *pcmBuffer, int size );
 qboolean CL_CloseAVI( void );
 qboolean CL_VideoRecording( void );
 
-/* Added in Omaha: capture through the active sound host (snd_host.cpp). */
-qboolean S_Capture_Begin( void );
-void     S_Capture_End( void );
-void     S_Capture_Frame( int aviFps );
-qboolean S_Capture_Active( void );
-int      S_Capture_SampleRate( void );
-
 //
 // cl_consolecmds.cpp
 //
 void CL_InitConsoleCommands( void );
+
+#ifdef USE_DISCORD
+//
+// cl_discord.c
+//
+void CL_Discord_Init( void );
+void CL_Discord_Frame( void );
+void CL_Discord_Shutdown( void );
+#endif
 
 #ifdef __cplusplus
 }

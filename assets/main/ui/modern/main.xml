@@ -49,7 +49,7 @@
 				</container>
 				<container id="menu_brand" type="horizontal" width="auto" height="100%" gap="16px"
 				           valign="center" padding="0 16px 0 0">
-					<label font="control" font-size="{var.text-display}" color="{var.color-white}" letter-spacing="4px">PROJECT: OMAHA</label>
+					<label font="control" font-size="{var.text-display}" color="{var.color-white}" letter-spacing="4px">OPENMOH ARENA</label>
 					<shape shape="allied-star" height="35px" width="35px" fill="{var.color-white}"/>
 				</container>
 			</container>
@@ -180,8 +180,6 @@
 										<use template="settings-keybind-row" label="Toggle First Person Spectate" binding="toggle_spectate_firstperson"/>
 										<use template="settings-keybind-row" label="Scoreboard Cursor" binding="toggle_scoreboard_cursor"/>
 										<use template="settings-keybind-row" label="Cycle Scoreboard Sort" binding="cycle_scoreboard_sort"/>
-										<use template="settings-keybind-row" label="Screenshot PNG" binding="screenshotPNG"/>
-										<use template="settings-keybind-row" label="Screenshot JPEG" binding="screenshotJPEG"/>
 								</container>
 								<container type="vertical" width="fill" height="auto" gap="8px" padding="0 0 0 4px">
 									<use template="settings-section-header" label="MOUSE"/>
@@ -191,26 +189,8 @@
 									<use template="settings-number-row" label="Mouse DPI" bind="cvar:ui_modernsettings_dpi" min="100" max="32000" step="50" commit="change" visible="{cvar.ui_modernsettings_sensitivity_mode == cm360}"/>
 									<use template="settings-cyclic-row" label="Zoom Sensitivity" bind="cvar:cg_zoomSensitivity" source="zoom-sensitivity-mode" commit="change"/>
 									<use template="settings-on-off-row" label="Invert mouse" bind="cvar:m_pitch" commit="change" value-type="invert-mouse"/>
-									<use template="settings-on-off-row" label="Mouse Acceleration" bind="cvar:cl_mouseAccel" commit="change" value-type="accel-toggle"/>
-									<!-- Added in Omaha: acceleration tuning, shown while acceleration is on. -->
-									<use template="settings-cyclic-row" label="Acceleration Style" bind="cvar:cl_mouseAccelStyle" source="mouse-accel-style" commit="change"
-									     visible="{cvar.cl_mouseAccel != 0}"/>
-									<container width="fill" height="auto" padding="8px 12px"
-									           visible="{cvar.cl_mouseAccel != 0 and (cvar.ui_om_settings_search == '' or icontains('Mouse Acceleration', cvar.ui_om_settings_search))}">
-										<container role="mouseaccel-preview" width="fill" height="140px" fill="{var.fill-control}"
-										           stroke="{var.stroke-border}" stroke-width="1px" shape="rectangle"/>
-									</container>
-									<use template="settings-slider-row" label="Acceleration" bind="cvar:cl_mouseAccel" min="0.01" max="5" step="0.01" commit="change"
-									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle == 1}"/>
-									<use template="settings-slider-row" label="Acceleration" bind="cvar:cl_mouseAccel" min="0.001" max="1" step="0.001" commit="change"
-									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle != 1}"/>
-									<use template="settings-slider-row" label="Acceleration Offset" bind="cvar:cl_mouseAccelOffset" min="0" max="50" step="0.1" commit="change"
-									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle != 0}"/>
-									<use template="settings-slider-row" label="Acceleration Power" bind="cvar:cl_mouseAccelPower" min="1" max="6" step="0.01" commit="change"
-									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle == 2}"/>
-									<use template="settings-slider-row" label="Sensitivity Cap" bind="cvar:cl_mouseSensCap" min="0" max="30" step="0.01" commit="change"
-									     visible="{cvar.cl_mouseAccel != 0 and cvar.cl_mouseAccelStyle == 2}"/>
 									<use template="settings-on-off-row" label="Mouse smoothing" bind="cvar:m_filter" commit="change"/>
+									<use template="settings-on-off-row" label="Mouse Acceleration" bind="cvar:cl_mouseAccel" commit="change"/>
 									<use template="settings-slider-row" label="m_yaw" bind="cvar:m_yaw" min="0.001" max="1" step="0.001" commit="change"/>
 									<use template="settings-slider-row" label="m_pitch" bind="cvar:m_pitch" min="0.001" max="1" step="0.001" commit="change"
 									     value-type="pitch-magnitude"/>
@@ -322,8 +302,6 @@
 								<use template="settings-cyclic-row" label="Weapons Bar" bind="cvar:ui_weaponsbar" source="weapons-bar" commit="change"
 								     visible="{cvar.cg_hud != 0}"/>
 								<use template="settings-on-off-row" label="Enable scoreboard cursor" bind="cvar:ui_om_scoreboard_disable_cursor" commit="change" off-value="1" on-value="0"/>
-								<use template="settings-on-off-row" label="Grenade charge bar" bind="cvar:cg_grenade_charge_bar" commit="change"
-								     visible="{cvar.cg_hud != 0}"/>
 								<use template="settings-section-header" label="GAMEPLAY"/>
 								<use template="settings-on-off-row" label="Always run" bind="cvar:cl_run" commit="change"/>
 								<use template="settings-on-off-row" label="Auto-switch Weapons" bind="cvar:cg_autoswitch" commit="change"/>

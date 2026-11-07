@@ -56,6 +56,15 @@ UILayout::UILayout(const char *filename)
     }
 }
 
+UILayout::UILayout(const char *name, const char *buffer, int length)
+{
+    BogusFunction();
+    m_script   = NULL;
+    m_filename = name;
+
+    LoadBuffer(name, buffer, length);
+}
+
 void UILayout::BogusFunction(void) {}
 
 void UILayout::CreateWidgetContainer(Event *ev)
@@ -234,6 +243,19 @@ void UILayout::Load(const char *filename, bool bFullLoad)
     m_script = NULL;
 
     UID_ProfileEnd(UID_PROF_LEGACY_LOAD);
+}
+
+void UILayout::LoadBuffer(const char *name, const char *buffer, int length)
+{
+    m_bLoaded = true;
+
+    m_script = new Script;
+    m_script->LoadFile(name, length, buffer);
+
+    ProcessCommands(true);
+
+    delete m_script;
+    m_script = NULL;
 }
 
 int UILayout::ForceLoad(void)

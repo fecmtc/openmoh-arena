@@ -32,15 +32,18 @@ source tree, or write to the Free Software Foundation, Inc.,
  * comb while pinna / ITD cues stay intact:
  *  - per-voice direct: dense elev/az bake of onset-aligned + min-phase FIRs (full IR,
  *    float ITD) with bilinear lookup; live SOFA only if bake gate fails or
- *    s_hrtf_live_query; re-query + crossfade only the min-phase filters, and
+ *    s_hrtf_live_query (designed on a thread of its own, the bake's filter until
+ *    then); re-query + crossfade only the min-phase filters, and
  *  - 3rd-order 3D ambisonic bus (ACN / N3D): MagLS Lebedev decoder (complex LS / ITD
  *    below ~2 kHz, magnitude match above with Hold average phase continuation) plus
  *    diffuse-field EQ. Bus runs ~64 samples behind.
  *
- * Directions are unit vectors in OpenAL listener space (x right, y up, -z front).
+ * Directions are unit vectors in Omaha listener space (x front, y left, z up).
  * Every process call takes a sample count that is a multiple of OM_HRTF_BLOCK; the
  * mixer renders whole blocks in HRTF mode so filtering adds no latency.
- * Nothing here locks: the mixer calls in with s_mixMutex held.
+ * Nothing here locks: only the mixer calls in, inside the s_mixGate section. With live
+ * SOFA it posts a semaphore to the design thread, which owns a voice's filtNext while
+ * its request is queued.
  */
 
 #include "../../qcommon/q_shared.h"
@@ -52,15 +55,11 @@ source tree, or write to the Free Software Foundation, Inc.,
 typedef struct omHrtfVoice_s omHrtfVoice_t;
 
 /* Build the HRTF context from a SOFA file image, resampled to sampleRate. */
-qboolean OmHrtf_Load(const void *data, int size, int sampleRate, const char *label);
+/* voicePool: direct voices preallocated for OmHrtf_VoiceAlloc. */
+qboolean OmHrtf_Load(const void *data, int size, int sampleRate, const char *label, int voicePool);
 void     OmHrtf_Unload(void);
-qboolean OmHrtf_Active(void);
-/* Added in Omaha: DIRECT dense bake is active (SOFA closed). */
-qboolean OmHrtf_BakeActive(void);
-/* Added in Omaha: last bake-vs-live gate max magnitude error (dB). */
-float OmHrtf_BakeGateMaxMagDb(void);
 
-/* Per-voice direct path. Alloc reuses a free list; Free returns it there. */
+/* Per-voice direct path. Alloc pops the load-time pool (NULL when empty); Free returns it there. */
 omHrtfVoice_t *OmHrtf_VoiceAlloc(void);
 void           OmHrtf_VoiceFree(omHrtfVoice_t *hv);
 void           OmHrtf_VoiceReset(omHrtfVoice_t *hv);

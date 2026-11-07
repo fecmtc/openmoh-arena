@@ -1,4 +1,4 @@
-if(NOT BUILD_GAME_LIBRARIES AND NOT BUILD_GAME_QVMS)
+if(NOT BUILD_GAME_LIBRARIES)
     return()
 endif()
 
@@ -17,13 +17,15 @@ file(GLOB_RECURSE CGAME_SOURCES
 )
 
 set(CGAME_BINARY_SOURCES)
-set(CGAME_QVM_SOURCES)
 
 file(GLOB_RECURSE GAME_SOURCES
     ${SOURCE_DIR}/fgame/*.c ${SOURCE_DIR}/fgame/*.cpp
     ${SOURCE_DIR}/script/*.c ${SOURCE_DIR}/script/*.cpp
 	${SOURCE_DIR}/parser/parsetree.cpp
 )
+
+# Unit tests under fgame/tests must not ship in the game module.
+list(FILTER GAME_SOURCES EXCLUDE REGEX "/fgame/tests/")
 
 # Compile lexer and grammar files
 
@@ -43,12 +45,10 @@ list(APPEND GAME_SOURCES
 )
 
 set(GAME_BINARY_SOURCES)
-set(GAME_QVM_SOURCES)
 
 set(UI_SOURCES)
 
 set(UI_BINARY_SOURCES)
-set(UI_QVM_SOURCES)
 
 set(GAME_MODULE_SHARED_SOURCES
     ${SOURCE_DIR}/qcommon/q_math.c

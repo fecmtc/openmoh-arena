@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Client
 
 - Add support for one-shot animated shaders in the UI (#838) (not supported in the original game).
+- A second sound host, the Omaha mixer, picked with `s_backend omaha`. OpenAL stays the default and ships with the game. `s_device` selects the Omaha mixer's output device; `s_openaldevice` and `s_openaldriver` are read by OpenAL as before.
 
 #### Platform
 

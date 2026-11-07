@@ -265,9 +265,8 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw "The modern UI pack was not built" }
 
     # The license, the written source offer with this build's versions, the
-    # notices for the modern UI and the Omaha mixer, the mixer's headphone
-    # set, and the SHA-256 of every exe and DLL (the launcher accepts only
-    # these exes) and of the modern UI pack.
+    # notices for the modern UI, and the SHA-256 of every exe and DLL (the
+    # launcher accepts only these exes) and of the modern UI pack.
     - name: MoH Arena files
       working-directory: ${{github.workspace}}
       run: |
@@ -275,10 +274,6 @@ jobs:
         if (-not (Test-Path "$Package/openmohaa.exe")) { throw "openmohaa.exe is missing from the package" }
         Copy-Item 'source/COPYING.txt' -Destination $Package
         Copy-Item 'source/misc/moharena/THIRD-PARTY.txt' -Destination $Package
-        Copy-Item 'source/code/thirdparty/OMAHA-SOUND-LICENSES.txt' -Destination $Package
-        New-Item -ItemType Directory "$Package/main/sound/prom" -Force | Out-Null
-        Copy-Item 'source/assets/main/sound/prom/hrtf' -Destination "$Package/main/sound/prom" -Recurse
-        if (-not (Test-Path "$Package/main/sound/prom/hrtf/SADIE_KU100_DFC_256_order_fir_48000.sofa")) { throw "The headphone set is missing from the package" }
         $Offer = Get-Content -Raw 'source/misc/moharena/SOURCE-OFFER.txt'
         $Offer += "`nBuild`n"
         $Offer += "  OpenMoH Arena commit: ${{ github.sha }}`n"
