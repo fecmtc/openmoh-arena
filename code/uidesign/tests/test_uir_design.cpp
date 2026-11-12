@@ -12545,6 +12545,75 @@ static void TestKillFeedClassify(void)
 		"tripped on", "'s grenade", 'p', weapon, sizeof(weapon), kind, sizeof(kind), &headshot, &friendly
 	);
 	CHECK(std::strcmp(weapon, "grenade") == 0);
+
+	// The server's localization file fixes the game's "'s' SMG" to "'s SMG".
+	CL_KillFeed_Classify(
+		"was perforated by", "'s SMG in the neck", 'p', weapon, sizeof(weapon), kind, sizeof(kind), &headshot, &friendly
+	);
+	CHECK(std::strcmp(weapon, "smg") == 0);
+	CHECK(headshot == 1);
+}
+
+// Old-protocol servers send each death as one printed sentence, which the feed takes apart.
+static void TestKillFeedParseDeathPrint(void)
+{
+	struct {
+		const char *text;
+		const char *victim;
+		const char *attacker;
+		const char *s1;
+		char        type;
+		const char *weapon;
+	} cases[] = {
+		{"Alpha was perforated by Bravo's SMG in the upper torso\n", "Alpha", "Bravo", "was perforated by", 'p', "smg"},
+		{"Alpha was perforated by Bravo's' SMG in the head", "Alpha", "Bravo", "was perforated by", 'p', "smg"},
+		{"Alpha was machine-gunned by Bravo in the head", "Alpha", "Bravo", "was machine-gunned by", 'p', "mg"},
+		{"Alpha was sniped by Bravo", "Alpha", "Bravo", "was sniped by", 'p', "sniper"},
+		{"Alpha took Bravo's rocket right in the kisser", "Alpha", "Bravo", "took", 'p', "rocket"},
+		{"Alpha was blown away by Bravo", "Alpha", "Bravo", "was blown away by", 'p', "explosion"},
+		{"Alpha was killed by Bravo", "Alpha", "Bravo", "was killed by", 'p', "unknown"},
+		{"Alpha took himself out of commision", "Alpha", "", "took himself out of commision", 's', "unknown"},
+		{"Alpha tripped on his own grenade", "Alpha", "", "tripped on his own grenade", 's', "grenade"},
+		{"Alpha shot himself in the", "Alpha", "", "shot himself", 's', "unknown"},
+		{"Alpha cratered", "Alpha", "", "cratered", 'w', "unknown"},
+		{"Alpha was shot in the", "Alpha", "", "was shot", 'w', "unknown"},
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		char victim[64];
+		char attacker[64];
+		char s1[64];
+		char s2[64];
+		char type = 0;
+		char weapon[32];
+		char kind[16];
+		int  headshot = 0;
+		int  friendly = 0;
+
+		CHECK(CL_KillFeed_ParseDeathPrint(
+			cases[i].text, victim, sizeof(victim), attacker, sizeof(attacker), s1, sizeof(s1), s2, sizeof(s2), &type
+		));
+		CHECK(std::strcmp(victim, cases[i].victim) == 0);
+		CHECK(std::strcmp(attacker, cases[i].attacker) == 0);
+		CHECK(std::strcmp(s1, cases[i].s1) == 0);
+		CHECK(type == cases[i].type);
+		CL_KillFeed_Classify(s1, s2, type, weapon, sizeof(weapon), kind, sizeof(kind), &headshot, &friendly);
+		CHECK(std::strcmp(weapon, cases[i].weapon) == 0);
+	}
+
+	{
+		char victim[64];
+		char attacker[64];
+		char s1[64];
+		char s2[64];
+		char type = 0;
+
+		CHECK(!CL_KillFeed_ParseDeathPrint(
+			"Alpha says hello", victim, sizeof(victim), attacker, sizeof(attacker), s1, sizeof(s1), s2, sizeof(s2),
+			&type
+		));
+	}
 }
 
 } // namespace
@@ -12739,6 +12808,7 @@ int main(void)
 	TestMarqueeLabelPaint();
 	TestTextOverflowEllipsis();
 	TestKillFeedClassify();
+	TestKillFeedParseDeathPrint();
 	TestDiagListTruncationKeepsPath();
 
 	if (g_failures) {

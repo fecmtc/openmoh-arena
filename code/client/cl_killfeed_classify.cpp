@@ -32,11 +32,14 @@ typedef struct {
 } cl_killfeed_phrase_t;
 
 /* Added in Omaha: distinctive Obituary English keys → weapon_class. */
+// Changed in MoH Arena: every obituary fgame/player.cpp sends, so none falls back to the raw sentence.
 static const cl_killfeed_phrase_t s_playerPhrases[] = {
 	{"was gunned down by", "", "pistol"},
 	{"was rifled by", "", "rifle"},
 	{"was sniped by", "", "sniper"},
+	/* The game sends "'s' SMG"; the server's localization file turns it into "'s SMG" for old clients. */
 	{"was perforated by", "'s' SMG", "smg"},
+	{"was perforated by", "'s SMG", "smg"},
 	{"was machine-gunned by", "", "mg"},
 	{"was hunted down by", "", "shotgun"},
 	{"was pumped full of buckshot by", "", "shotgun"},
@@ -49,22 +52,44 @@ static const cl_killfeed_phrase_t s_playerPhrases[] = {
 	{"was clubbed by", "", "bash"},
 	{"was crushed by", "", "crush"},
 	{"was telefragged by", "", "telefrag"},
+	{"was burned up by", "", "fire"},
+	{"was melted by", "", "unknown"},
+	{"was pushed over the edge by", "", "unknown"},
+	{"was blown away by", "", "explosion"},
+	{"was knocked out by", "", "unknown"},
+	{"was run over by", "", "unknown"},
+	{"was impaled by", "", "unknown"},
 	{"was shot by", "", "unknown"},
+	{"was killed by", "", "unknown"},
 	{NULL, NULL, NULL},
 };
 
+/* Only the obituaries a player gets for killing himself. */
 static const cl_killfeed_phrase_t s_suicidePhrases[] = {
 	{"played catch with himself", NULL, "grenade"},
 	{"tripped on his own grenade", NULL, "grenade"},
 	{"rocketed himself", NULL, "rocket"},
 	{"was hoist on his own pitard", NULL, "landmine"},
+	{"was hoist on his own petard", NULL, "landmine"},
+	{"took himself out of commision", NULL, "unknown"},
+	{"took himself out of commission", NULL, "unknown"},
+	{"blew himself up", NULL, "explosion"},
+	{"shot himself", NULL, "unknown"},
 	{NULL, NULL, NULL},
 };
 
+/* Deaths with no killer. The game also sends the lava, slime, fall and "died" lines for a
+ * suicide; the printed sentence can't tell the two apart, so they show as world deaths. */
 static const cl_killfeed_phrase_t s_worldPhrases[] = {
 	{"caught some shrapnel", NULL, "grenade"},
 	{"caught a rocket", NULL, "rocket"},
 	{"stepped on a land mine", NULL, "landmine"},
+	{"was burned to a crisp", NULL, "fire"},
+	{"was melted to nothing", NULL, "unknown"},
+	{"cratered", NULL, "unknown"},
+	{"blew up", NULL, "explosion"},
+	{"was shot", NULL, "unknown"},
+	{"died", NULL, "unknown"},
 	{NULL, NULL, NULL},
 };
 
@@ -133,6 +158,7 @@ static qboolean CL_KillFeed_MatchPhrase(
 	const cl_killfeed_phrase_t *table,
 	const char *s1,
 	const char *s2Base,
+	const char *s2,
 	const char **weaponOut
 )
 {
@@ -157,7 +183,8 @@ static qboolean CL_KillFeed_MatchPhrase(
 			}
 			continue;
 		}
-		if (s2Base && !Q_stricmpn(s2Base, table[i].s2Prefix, strlen(table[i].s2Prefix))) {
+		// Changed in MoH Arena: the whole s2, since "'s rocket right in the kisser" holds " in the ".
+		if (s2 && !Q_stricmpn(s2, table[i].s2Prefix, strlen(table[i].s2Prefix))) {
 			*weaponOut = table[i].weaponClass;
 			return qtrue;
 		}
@@ -219,11 +246,11 @@ void CL_KillFeed_Classify(
 	}
 
 	if (lowerType == 's') {
-		CL_KillFeed_MatchPhrase(s_suicidePhrases, s1 ? s1 : "", s2Base, &weapon);
+		CL_KillFeed_MatchPhrase(s_suicidePhrases, s1 ? s1 : "", s2Base, s2, &weapon);
 	} else if (lowerType == 'w') {
-		CL_KillFeed_MatchPhrase(s_worldPhrases, s1 ? s1 : "", s2Base, &weapon);
+		CL_KillFeed_MatchPhrase(s_worldPhrases, s1 ? s1 : "", s2Base, s2, &weapon);
 	} else {
-		CL_KillFeed_MatchPhrase(s_playerPhrases, s1 ? s1 : "", s2Base, &weapon);
+		CL_KillFeed_MatchPhrase(s_playerPhrases, s1 ? s1 : "", s2Base, s2, &weapon);
 	}
 
 	if (weaponClassOut && weaponClassSize > 0) {
